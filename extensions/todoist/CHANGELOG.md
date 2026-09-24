@@ -1,5 +1,10 @@
 # Todoist Changelog
 
+## [Fix stale reMarkable folder listings] - {PR_MERGE_DATE}
+
+- Reconcile folder listings with the live Cloud sync index so newly created folders appear and can be reused without duplicates.
+- Refresh expired upload sessions before use and clarify that Cloud confirmation does not verify tablet synchronization.
+
 ## [Send daily plans to reMarkable] - {PR_MERGE_DATE}
 
 - Add a macOS command to select today’s and overdue Todoist tasks in Europe/Oslo and preview a Norwegian A4 daily plan.

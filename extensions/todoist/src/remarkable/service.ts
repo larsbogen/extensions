@@ -76,6 +76,9 @@ export function parseFolders(stdout: string): Folder[] {
   if (!payload || payload.protocol_version !== 1) throw new Error("Oppdater rm2; mappesvaret har et ukjent format.");
   if (!payload.ok) {
     if (payload.error?.code === "read_auth") throw new Error(FOLDER_LOGIN);
+    if (payload.error?.code === "upload_auth") throw new Error(UPLOAD_LOGIN);
+    if (payload.error?.code === "account_mismatch")
+      throw new Error("Mappe- og opplastingsinnloggingen må tilhøre samme reMarkable-konto.");
     if (payload.error?.code === "keychain")
       throw new Error("rm2 fikk ikke tilgang til macOS Nøkkelring. Kontroller tilgangen og prøv igjen.");
     throw new Error("Kunne ikke hente Cloud-mapper. Kontroller nettverket og rm2-installasjonen, og prøv igjen.");
@@ -204,7 +207,7 @@ export class DailyPlanService {
   }
   async folders(): Promise<Folder[]> {
     const rm2 = await this.rm2();
-    const result = await this.run(rm2, ["cloud", "list", "--kind", "folder", "--app-json"], {
+    const result = await this.run(rm2, ["cloud", "list", "--kind", "folder", "--fresh", "--app-json"], {
       env: this.environment(),
     });
     if (result.code !== 0 && !result.stdout.trim())
@@ -245,14 +248,13 @@ export class DailyPlanService {
           result.protocol_version === 1 &&
           result.ok === true &&
           Array.isArray(result.data?.features) &&
-          result.data.features.includes("create_folder");
+          result.data.features.includes("create_folder") &&
+          result.data.features.includes("fresh_listing");
       } catch {
         /* old CLI */
       }
       if (!supported)
-        throw new Error(
-          "Denne rm2-versjonen kan ikke opprette mapper. Oppdater rm2 med cloud mkdir-støtte; se utvidelsens README.",
-        );
+        throw new Error("Oppdater rm2 med støtte for ferske mapper og cloud mkdir; se utvidelsens README.");
       await writeFile(marker, JSON.stringify({ name, createdAt: new Date().toISOString() }), { mode: 0o600 });
       let result;
       try {
@@ -271,6 +273,8 @@ export class DailyPlanService {
         const code = payload.error?.code;
         const known = [
           "read_auth",
+          "upload_auth",
+          "account_mismatch",
           "invalid_name",
           "invalid_parent",
           "duplicate_folder",
@@ -281,6 +285,9 @@ export class DailyPlanService {
         if (!known.includes(code) || payload.error?.may_have_uploaded) throw new Error(uncertain);
         await rm(marker);
         if (code === "read_auth") throw new Error(FOLDER_LOGIN);
+        if (code === "upload_auth") throw new Error(UPLOAD_LOGIN);
+        if (code === "account_mismatch")
+          throw new Error("Mappe- og opplastingsinnloggingen må tilhøre samme reMarkable-konto.");
         if (code === "duplicate_folder")
           throw new Error("Flere mapper har dette navnet. Velg en eksisterende mappe fra listen.");
         throw new Error(

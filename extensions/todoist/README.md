@@ -73,8 +73,10 @@ emojis. Skriftene bygges inn i PDF-en.
 
 - Installer `rm2` med Cloud-støtte fra den lokale reMarkable CLI-installasjonen.
 - Installer Poppler (`brew install poppler`) for `pdfinfo` og `pdftoppm`.
-- `rm2 cloud web-login` kreves for å hente og opprette mapper.
-- Mappeoppretting krever `rm2 cloud mkdir` og `create_folder` i CLI-ens capabilities.
+- Mappevalg og oppretting krever både `rm2 cloud web-login` og `rm2 cloud login`.
+  Web-listen kan være forsinket; `--fresh` kontrollerer derfor mappeinnholdet mot
+  den levende synkroniseringsindeksen før valg eller oppretting.
+- Mappeoppretting krever `rm2 cloud mkdir` og `create_folder` og `fresh_listing` i CLI-ens capabilities.
   Den lokale installasjonen er oppdatert; endringen og oppsett er dokumentert i
   [support/rm2-cloud-mkdir.md](support/rm2-cloud-mkdir.md).
 - `rm2 cloud login` kreves for sending. Den lagrede upload-parent-ID-en brukes

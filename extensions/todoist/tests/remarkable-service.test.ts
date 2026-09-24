@@ -264,7 +264,7 @@ describe("folder creation", () => {
   });
   beforeEach(() => {
     runner.mockImplementation(async (_exe, args) => {
-      if (args[1] === "capabilities") return response({ features: ["create_folder"] });
+      if (args[1] === "capabilities") return response({ features: ["create_folder", "fresh_listing"] });
       if (args[1] === "list") return response([]);
       return response(item);
     });
@@ -378,4 +378,23 @@ describe("folder creation", () => {
     await first;
     expect(creates()).toHaveLength(1);
   });
+});
+
+it("requires a fresh sync-backed folder listing, including canonical destination IDs", async () => {
+  runner.mockResolvedValueOnce({
+    code: 0,
+    stdout: JSON.stringify({
+      protocol_version: 1,
+      ok: true,
+      data: [{ kind: "folder", upload_parent_id: folder.id, name: "Dagsplaner", parent: "" }],
+    }),
+    stderr: "",
+  });
+  expect((await service.folders())[0].id).toBe(folder.id);
+  expect(runner.mock.calls[0][1]).toEqual(["cloud", "list", "--kind", "folder", "--fresh", "--app-json"]);
+});
+it("explains when fresh folder listing needs renewed upload authentication", () => {
+  expect(() =>
+    parseFolders(JSON.stringify({ protocol_version: 1, ok: false, error: { code: "upload_auth" } })),
+  ).toThrow("rm2 cloud login");
 });

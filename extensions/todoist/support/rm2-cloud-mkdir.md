@@ -61,3 +61,23 @@ blocks another write for that name until a fresh listing resolves it.
 Tests use mocked HTTP/process responses. They cover the request contract, parent
 UUID versus read hash, reuse, validation, authentication, uncertain outcomes,
 process interruption and concurrent calls. No test creates real Cloud folders.
+
+## Fresh Cloud state correction
+
+The web file-list endpoint was observed returning an older index even after
+successful folder creation and PDF upload. The documents and folder were present
+in the live regional sync root. `rm2 cloud list --fresh --app-json` now reconciles
+the web response with a read-only `/sync/v3/root` and its content-addressed indices.
+Metadata is reused only when its hash matches. Changed or new entries are read
+from storage; removed entries are excluded. A second root read rejects a changing
+snapshot instead of returning stale results. Both v3 and v4 index formats are
+supported; no sync files are written.
+
+This requires both existing logins on the same account. `cloud mkdir` uses the
+fresh view before checking for name collisions. Upload sessions now honor JWT
+expiration with a short safety margin instead of a fixed 23-hour cache window.
+
+Apply [rm2-fresh-cloud-state.patch](rm2-fresh-cloud-state.patch) after the folder
+patch on a compatible checkout. Both are already applied to the local editable
+installation. Live verification read the created folder and the two existing
+uploads from sync storage; it did not repeat those PDF uploads.

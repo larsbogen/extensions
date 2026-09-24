@@ -37,7 +37,7 @@ const STATE_LABELS: Record<JobState, string> = {
   validating: "Validerer alle PDF-sider …",
   ready: "Forhåndsvisning klar",
   sending: "Sender til reMarkable …",
-  sent: "Sendt til reMarkable",
+  sent: "Sendt til reMarkable Cloud",
   uncertain: "Sending ikke bekreftet",
   error: "Eksport mislyktes",
 };
@@ -78,7 +78,7 @@ function CreateFolderForm({
       <Detail
         isLoading
         navigationTitle="Opprett mappe"
-        markdown="# Oppretter mappe …\n\nVent mens reMarkable bekrefter målmappe."
+        markdown={"# Oppretter mappe …\n\nVent mens reMarkable bekrefter målmappe."}
       />
     );
   return (
@@ -92,7 +92,7 @@ function CreateFolderForm({
         </ActionPanel>
       }
     >
-      <Form.Description text="Mappen opprettes i Mine filer på reMarkable og velges som målmappe. Hvis en mappe med samme navn allerede finnes der, brukes den. Krever web-innlogging." />
+      <Form.Description text="Mappen opprettes i Mine filer på reMarkable og velges som målmappe. Hvis en mappe med samme navn allerede finnes der, brukes den. Krever innlogging for mapper og opplasting." />
       <Form.TextField id="folderName" title="Mappenavn" value={name} onChange={setName} error={error} />
     </Form>
   );
@@ -341,6 +341,9 @@ export function DailyPlanCommand() {
       "",
       "PDF-en er et frosset øyeblikksbilde. Avkrysninger og notater synkroniseres ikke til Todoist.",
       ...(job.documentId ? ["", `Dokument-ID: \`${job.documentId}\``] : []),
+      ...(job.state === "sent"
+        ? ["", "Åpne målmappen på reMarkable. Nettbrettet må være tilkoblet og ha synkronisert for å vise dokumentet."]
+        : []),
       ...(uncertain
         ? ["", "Kontroller reMarkable før du lager en ny eksport. Dokumentet kan allerede være sendt."]
         : []),
@@ -471,6 +474,10 @@ export default function Command() {
   return process.platform === "darwin" ? (
     <AuthenticatedCommand />
   ) : (
-    <Detail markdown="# Krever macOS\n\nDagsplaner bruker macOS-skrifter og den lokale rm2-arbeidsflyten på Mac. De øvrige Todoist-kommandoene kan fortsatt brukes på Windows." />
+    <Detail
+      markdown={
+        "# Krever macOS\n\nDagsplaner bruker macOS-skrifter og den lokale rm2-arbeidsflyten på Mac. De øvrige Todoist-kommandoene kan fortsatt brukes på Windows."
+      }
+    />
   );
 }
