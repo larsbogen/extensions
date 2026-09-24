@@ -13,7 +13,7 @@ export type ToolPreferences = {
   pdfinfoPath?: string;
   pdftoppmPath?: string;
 };
-export type Folder = { id: string; name: string };
+export type Folder = { id: string; name: string; parent?: string };
 export type JobState = "exporting" | "validating" | "ready" | "sending" | "sent" | "uncertain" | "error";
 export type ExportJob = {
   version: 1;
@@ -90,7 +90,11 @@ export function parseFolders(stdout: string): Folder[] {
         UUID.test(item.upload_parent_id) &&
         typeof item.name === "string",
     )
-    .map((item: { upload_parent_id: string; name: string }) => ({ id: item.upload_parent_id, name: item.name }));
+    .map((item: { upload_parent_id: string; name: string; parent?: string }) => ({
+      id: item.upload_parent_id,
+      name: item.name,
+      ...(typeof item.parent === "string" ? { parent: item.parent } : {}),
+    }));
 }
 
 export function validatePdfInfo(output: string, expectedPages?: number): number {
@@ -156,7 +160,7 @@ export class DailyPlanService {
       } catch {
         /* a live process may still be writing the lock */
       }
-      if (alive) throw new Error("En eksport eller sending pågår allerede. Vent til den er ferdig.");
+      if (alive) throw new Error("En eksport, sending eller mappeopprettelse pågår allerede. Vent til den er ferdig.");
       await rm(lockPath);
       handle = await open(lockPath, "wx", 0o600);
     }
@@ -191,12 +195,15 @@ export class DailyPlanService {
       PATH: ["/opt/homebrew/bin", "/usr/local/bin", process.env.PATH ?? "", "/usr/bin", "/bin"].join(path.delimiter),
     };
   }
-  async folders(): Promise<Folder[]> {
-    const rm2 = await executable("rm2", this.prefs.rm2Path, [
+  private rm2() {
+    return executable("rm2", this.prefs.rm2Path, [
       path.join(homedir(), "Library/Python/3.9/bin/rm2"),
       "/opt/homebrew/bin/rm2",
       "/usr/local/bin/rm2",
     ]);
+  }
+  async folders(): Promise<Folder[]> {
+    const rm2 = await this.rm2();
     const result = await this.run(rm2, ["cloud", "list", "--kind", "folder", "--app-json"], {
       env: this.environment(),
     });
@@ -205,6 +212,87 @@ export class DailyPlanService {
     return parseFolders(result.stdout).sort(
       (a, b) => Number(b.name === "Dagsplaner") - Number(a.name === "Dagsplaner") || a.name.localeCompare(b.name, "nb"),
     );
+  }
+  async createFolder(rawName: string): Promise<Folder> {
+    const name = rawName.trim().normalize("NFC");
+    if (!name || [...name].length > 255 || [...name].some((char) => char.charCodeAt(0) < 32 || "/\\".includes(char)))
+      throw new Error("Bruk et mappenavn på 1–255 tegn uten skråstreker eller kontrolltegn.");
+    return this.locked(async () => {
+      const uncertain =
+        "Mappeopprettelsen kunne ikke bekreftes. Oppdater mappelisten og kontroller reMarkable før et nytt forsøk.";
+      const key = createHash("sha256").update(name.toLocaleLowerCase("nb")).digest("hex");
+      const marker = path.join(this.root, `folder-create-${key}.json`);
+      try {
+        await access(marker);
+        // An interrupted/ambiguous creation may have succeeded. Only a fresh listing can recover it.
+        const matches = (await this.folders()).filter(
+          (f) => f.parent === "" && f.name.toLocaleLowerCase("nb") === name.toLocaleLowerCase("nb"),
+        );
+        if (matches.length !== 1) throw new Error(uncertain);
+        await rm(marker);
+        return matches[0];
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      const rm2 = await this.rm2();
+      const env = this.environment();
+      const capabilities = await this.run(rm2, ["cloud", "capabilities", "--json"], { env });
+      let supported = false;
+      try {
+        const result = JSON.parse(capabilities.stdout);
+        supported =
+          capabilities.code === 0 &&
+          result.protocol_version === 1 &&
+          result.ok === true &&
+          Array.isArray(result.data?.features) &&
+          result.data.features.includes("create_folder");
+      } catch {
+        /* old CLI */
+      }
+      if (!supported)
+        throw new Error(
+          "Denne rm2-versjonen kan ikke opprette mapper. Oppdater rm2 med cloud mkdir-støtte; se utvidelsens README.",
+        );
+      await writeFile(marker, JSON.stringify({ name, createdAt: new Date().toISOString() }), { mode: 0o600 });
+      let result;
+      try {
+        result = await this.run(rm2, ["cloud", "mkdir", "--app-json", "--", name], { env });
+      } catch {
+        throw new Error(uncertain);
+      }
+      let payload;
+      try {
+        payload = JSON.parse(result.stdout);
+      } catch {
+        throw new Error(uncertain);
+      }
+      if (payload?.protocol_version !== 1) throw new Error(uncertain);
+      if (!payload.ok) {
+        const code = payload.error?.code;
+        const known = [
+          "read_auth",
+          "invalid_name",
+          "invalid_parent",
+          "duplicate_folder",
+          "folder_rejected",
+          "keychain",
+          "local_file",
+        ];
+        if (!known.includes(code) || payload.error?.may_have_uploaded) throw new Error(uncertain);
+        await rm(marker);
+        if (code === "read_auth") throw new Error(FOLDER_LOGIN);
+        if (code === "duplicate_folder")
+          throw new Error("Flere mapper har dette navnet. Velg en eksisterende mappe fra listen.");
+        throw new Error(
+          "Mappen ble ikke opprettet. Kontroller navn, innlogging og tilgang til Nøkkelring, og prøv igjen.",
+        );
+      }
+      if (result.code !== 0) throw new Error(uncertain);
+      const folders = parseFolders(JSON.stringify({ ...payload, data: [payload.data] }));
+      if (folders.length !== 1) throw new Error(uncertain);
+      await rm(marker);
+      return folders[0];
+    });
   }
   async export(
     snapshot: PlanSnapshot,

@@ -6,6 +6,7 @@ import {
   Color,
   Detail,
   environment,
+  Form,
   getPreferenceValues,
   Icon,
   List,
@@ -42,6 +43,61 @@ const STATE_LABELS: Record<JobState, string> = {
 };
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : "Operasjonen mislyktes.");
 
+function CreateFolderForm({
+  service,
+  onCreated,
+  onCancel,
+}: {
+  service: DailyPlanService;
+  onCreated: (folder: Folder) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState("Dagsplaner");
+  const [error, setError] = useState<string>();
+  const [loading, setLoading] = useState(false);
+  const busy = useRef(false);
+  async function submit() {
+    if (busy.current) return;
+    busy.current = true;
+    setLoading(true);
+    setError(undefined);
+    try {
+      const folder = await service.createFolder(name);
+      await onCreated(folder);
+      await showToast({ style: Toast.Style.Success, title: "Målmappen er klar", message: folder.name });
+    } catch (e) {
+      setError(errorMessage(e));
+      await showToast({ style: Toast.Style.Failure, title: "Kunne ikke opprette mappe", message: errorMessage(e) });
+    } finally {
+      busy.current = false;
+      setLoading(false);
+    }
+  }
+  if (loading)
+    return (
+      <Detail
+        isLoading
+        navigationTitle="Opprett mappe"
+        markdown="# Oppretter mappe …\n\nVent mens reMarkable bekrefter målmappe."
+      />
+    );
+  return (
+    <Form
+      navigationTitle="Opprett mappe på reMarkable"
+      actions={
+        <ActionPanel>
+          <Action.SubmitForm title="Opprett Og Velg Mappe" icon={Icon.NewFolder} onSubmit={submit} />
+          <Action title="Tilbake Til Mapper" onAction={onCancel} />
+          <Action.CopyToClipboard title="Kopier Kommando for Mappeinnlogging" content="rm2 cloud web-login" />
+        </ActionPanel>
+      }
+    >
+      <Form.Description text="Mappen opprettes i Mine filer på reMarkable og velges som målmappe. Hvis en mappe med samme navn allerede finnes der, brukes den. Krever web-innlogging." />
+      <Form.TextField id="folderName" title="Mappenavn" value={name} onChange={setName} error={error} />
+    </Form>
+  );
+}
+
 function FolderPicker({
   service,
   onChoose,
@@ -50,6 +106,7 @@ function FolderPicker({
   onChoose: (folder: Folder) => Promise<void>;
 }) {
   const [folders, setFolders] = useState<Folder[]>([]);
+  const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const { pop } = useNavigation();
@@ -68,6 +125,18 @@ function FolderPicker({
   useEffect(() => {
     void load();
   }, [load]);
+  if (creating)
+    return (
+      <CreateFolderForm
+        service={service}
+        onCancel={() => setCreating(false)}
+        onCreated={async (folder) => {
+          await onChoose(folder);
+          pop();
+        }}
+      />
+    );
+  const createAction = <Action title="Opprett Ny Mappe" icon={Icon.NewFolder} onAction={() => setCreating(true)} />;
   return (
     <List
       isLoading={loading}
@@ -76,9 +145,10 @@ function FolderPicker({
     >
       <List.EmptyView
         title={error ? "Kunne ikke hente mapper" : "Ingen mapper funnet"}
-        description={error || "Opprett Dagsplaner i reMarkable-appen, og oppdater listen."}
+        description={error || "Velg Opprett ny mappe for å lage Dagsplaner eller en annen målmappe."}
         actions={
           <ActionPanel>
+            {createAction}
             <Action title="Hent Mapper På Nytt" icon={Icon.ArrowClockwise} onAction={load} />
             <Action.CopyToClipboard title="Kopier Kommando for Mappeinnlogging" content="rm2 cloud web-login" />
             <Action title="Åpne Innstillinger" onAction={openCommandPreferences} />
@@ -100,6 +170,7 @@ function FolderPicker({
                   pop();
                 }}
               />
+              {createAction}
               <Action title="Oppdater Mapper" onAction={load} />
             </ActionPanel>
           }

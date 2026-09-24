@@ -51,9 +51,10 @@ forfalte oppgaver, beregnet i Europe/Oslo. Den inkluderer aktive oppgaver med da
 eller deadline i dag eller tidligere, som er ufordelte eller tildelt deg.
 Todoist-data leses på nytt både når kommandoen åpnes og når forhåndsvisningen lages.
 
-1. Velg en eksisterende reMarkable-mappe fra handlingen **Velg målmappe**.
-   `Dagsplaner` foreslås først når den finnes. Opprett den i reMarkable-appen hvis
-   den mangler; CLI-en kan ikke opprette Cloud-mapper.
+1. Åpne **Velg målmappe**, og velg en eksisterende mappe eller **Opprett ny mappe**.
+   Navnefeltet foreslår `Dagsplaner`. Den nye mappen opprettes i **Mine filer** og
+   velges automatisk som målmappe. En eksisterende mappe med samme navn der
+   gjenbrukes; mapper andre steder påvirkes ikke.
 2. Alle oppgaver er valgt fra start. Enter velger bort/til én oppgave. Søk endrer
    ikke utvalget. Handlingsmenyen har også **Velg alle** og **Fjern alle valg**.
 3. **Lag forhåndsvisning** (`⌘↵`) fryser utvalget, lager PDF og kontrollerer hver
@@ -72,7 +73,10 @@ emojis. Skriftene bygges inn i PDF-en.
 
 - Installer `rm2` med Cloud-støtte fra den lokale reMarkable CLI-installasjonen.
 - Installer Poppler (`brew install poppler`) for `pdfinfo` og `pdftoppm`.
-- `rm2 cloud web-login` kreves for å hente mapper.
+- `rm2 cloud web-login` kreves for å hente og opprette mapper.
+- Mappeoppretting krever `rm2 cloud mkdir` og `create_folder` i CLI-ens capabilities.
+  Den lokale installasjonen er oppdatert; endringen og oppsett er dokumentert i
+  [support/rm2-cloud-mkdir.md](support/rm2-cloud-mkdir.md).
 - `rm2 cloud login` kreves for sending. Den lagrede upload-parent-ID-en brukes
   direkte, så senere sending trenger ikke web-innlogging.
 - PDF-forhåndsvisning kan lages uten gyldig upload-innlogging.
@@ -92,10 +96,15 @@ som brukes til validering slettes straks. **Vis eksportfiler** åpner jobbmappen
 
 Endret utvalg eller målmappe krever ny forhåndsvisning. **Åpne siste eksport**
 gjenåpner det tidligere, frosne dokumentet. PDF-ens kontrollsum verifiseres før
-sending. Bare én eksport/sending kan kjøre om gangen, også på tvers av
+sending. Bare én eksport, sending eller mappeopprettelse kan kjøre om gangen, også på tvers av
 kommandoinstanser. Bekreftet sending sperrer ny sending av samme jobb. Ved et
 uklart nettverksutfall eller avbrudd under opplasting må du kontrollere reMarkable;
 kommandoen prøver aldri å laste opp samme jobb automatisk igjen.
+
+Ved uklar mappeoppretting lagres en liten markør i støtteområdet. Et nytt forsøk
+med samme navn gjør bare et ferskt mappeoppslag: én entydig mappe i Mine filer kan
+gjenbrukes. Ellers må du kontrollere mappelisten; ingen ny opprettelse forsøkes
+automatisk. Markøren beholdes til opprettelsen er avklart.
 
 Hver eksport blir et nytt dokument. Eksisterende håndskrift beholdes, og
 avkrysninger eller notater synkroniseres ikke tilbake til Todoist. Ingen

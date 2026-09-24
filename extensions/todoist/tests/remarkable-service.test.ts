@@ -254,3 +254,128 @@ it("retains a retryable preview if the login check itself times out before uploa
   expect((await service.load(job.id)).state).toBe("ready");
   expect(runner.mock.calls.some(([, args]) => args[1] === "upload")).toBe(false);
 });
+
+describe("folder creation", () => {
+  const item = { kind: "folder", id: "read-hash", upload_parent_id: folder.id, name: folder.name, parent: "" };
+  const response = (data: unknown) => ({
+    code: 0,
+    stdout: JSON.stringify({ protocol_version: 1, ok: true, data }),
+    stderr: "",
+  });
+  beforeEach(() => {
+    runner.mockImplementation(async (_exe, args) => {
+      if (args[1] === "capabilities") return response({ features: ["create_folder"] });
+      if (args[1] === "list") return response([]);
+      return response(item);
+    });
+  });
+  const creates = () => runner.mock.calls.filter(([, args]) => args[1] === "mkdir");
+
+  it("returns the confirmed upload UUID, keeps shell characters literal and clears its pending marker", async () => {
+    const name = "--Dagsplaner $(echo test) æøå";
+    expect(await service.createFolder(` ${name} `)).toEqual({ ...folder, parent: "" });
+    expect(creates()[0][1]).toEqual(["cloud", "mkdir", "--app-json", "--", name]);
+    expect(await readdir(service.root)).toEqual([]);
+  });
+  it.each(["", "  ", "A/B", "A\\B", "A\nB", "x".repeat(256)])(
+    "rejects invalid names before any process starts: %s",
+    async (name) => {
+      await expect(service.createFolder(name)).rejects.toThrow("mappenavn");
+      expect(runner).not.toHaveBeenCalled();
+    },
+  );
+  it("explains an older CLI and never attempts creation", async () => {
+    runner.mockResolvedValueOnce(response({ features: ["app_json"] }));
+    await expect(service.createFolder("Dagsplaner")).rejects.toThrow("Oppdater rm2");
+    expect(creates()).toHaveLength(0);
+    expect(await readdir(service.root)).toEqual([]);
+  });
+  it("allows another attempt after a definite login failure without exposing raw errors", async () => {
+    const original = runner.getMockImplementation()!;
+    runner.mockImplementation(async (exe, args, opts) =>
+      args[1] === "mkdir"
+        ? {
+            code: 1,
+            stdout: JSON.stringify({
+              protocol_version: 1,
+              ok: false,
+              error: { code: "read_auth", message: "secret-token" },
+            }),
+            stderr: "",
+          }
+        : original(exe, args, opts),
+    );
+    await expect(service.createFolder("Dagsplaner")).rejects.toThrow("rm2 cloud web-login");
+    expect(await readdir(service.root)).toEqual([]);
+    runner.mockImplementation(original);
+    expect((await service.createFolder("Dagsplaner")).id).toBe(folder.id);
+  });
+  it.each(["timeout", "bad-json", "missing-id", "server"])(
+    "blocks further writes after an uncertain %s, including after reopening the command",
+    async (outcome) => {
+      const original = runner.getMockImplementation()!;
+      runner.mockImplementation(async (exe, args, opts) => {
+        if (args[1] !== "mkdir") return original(exe, args, opts);
+        if (outcome === "timeout") throw new Error("secret-token");
+        if (outcome === "bad-json") return { code: 1, stdout: "secret-token", stderr: "" };
+        if (outcome === "missing-id") return response({ ...item, upload_parent_id: null });
+        return {
+          code: 1,
+          stdout: JSON.stringify({
+            protocol_version: 1,
+            ok: false,
+            error: { code: "folder_uncertain", may_have_uploaded: true },
+          }),
+          stderr: "",
+        };
+      });
+      await expect(service.createFolder("Dagsplaner")).rejects.toThrow("kunne ikke bekreftes");
+      const reopened = new DailyPlanService(service.root, prefs, renderer, runner);
+      await expect(reopened.createFolder("dagsplaner")).rejects.toThrow("kunne ikke bekreftes");
+      expect(creates()).toHaveLength(1);
+      expect((await readdir(service.root)).filter((name) => name.startsWith("folder-create-"))).toHaveLength(1);
+    },
+  );
+  it("recovers an uncertain creation only from a fresh, unique root folder without another write", async () => {
+    const original = runner.getMockImplementation()!;
+    runner.mockImplementation(async (exe, args, opts) => {
+      if (args[1] === "mkdir") throw new Error("timeout");
+      return original(exe, args, opts);
+    });
+    await expect(service.createFolder("Dagsplaner")).rejects.toThrow("kunne ikke bekreftes");
+    runner.mockImplementation(async (exe, args, opts) =>
+      args[1] === "list"
+        ? response([{ ...item, upload_parent_id: documentId, parent: "other-parent" }, item])
+        : original(exe, args, opts),
+    );
+    expect(await service.createFolder("dagsplaner")).toEqual({ ...folder, parent: "" });
+    expect(creates()).toHaveLength(1);
+    expect(await readdir(service.root)).toEqual([]);
+  });
+  it("blocks a second command instance while creation is in progress", async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const started = new Promise<void>((r) => {
+      entered = r;
+    });
+    const original = runner.getMockImplementation()!;
+    runner.mockImplementation(async (exe, args, opts) => {
+      if (args[1] === "mkdir") {
+        entered();
+        await gate;
+      }
+      return original(exe, args, opts);
+    });
+    const first = service.createFolder("Dagsplaner");
+    await started;
+    await expect(
+      new DailyPlanService(service.root, prefs, renderer, runner).createFolder("Dagsplaner"),
+    ).rejects.toThrow("pågår allerede");
+    release();
+    await first;
+    expect(creates()).toHaveLength(1);
+  });
+});
