@@ -27,3 +27,19 @@ This extension includes a few commands that are disabled by default. You can ena
 In most cases, you can use OAuth to authenticate with Todoist. You'll be prompted to connect your Todoist account when using any of the extension's commands.
 
 However, if you prefer, you can also use an API token. To do so, you need to retrieve your token from the [integration settings view](https://todoist.com/app/settings/integrations) under the section called **API token**. Copy it and paste in the extension's preferences under **Todoist Token**.
+
+## Developing this fork
+
+This fork fixes filter pagination, sync cache merging, and task duplication.
+From `extensions/todoist`, run:
+
+```sh
+npm ci
+npm test
+npm run lint
+npm run build
+```
+
+Tests use simulated API responses and do not access a Todoist account.
+To load the fork locally in Raycast, run `npm run dev`. Authenticate in Raycast when prompted.
+The distribution build is written to `dist/`; building and testing do not install the fork or change the Store version.

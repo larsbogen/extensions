@@ -15,7 +15,6 @@ import { Fragment, useState } from "react";
 
 import {
   AddReminderArgs,
-  AddTaskArgs,
   MoveTaskArgs,
   Reminder,
   SyncData,
@@ -33,6 +32,7 @@ import {
 import CreateTask from "../create-task";
 import { getCollaboratorIcon, getProjectCollaborators } from "../helpers/collaborators";
 import { getAPIDate } from "../helpers/dates";
+import { duplicateTaskPayload } from "../helpers/duplicateTask";
 import { getRemainingLabels, getTaskLabels } from "../helpers/labels";
 import { refreshMenuBarCommand } from "../helpers/menu-bar";
 import { getPriorityIcon, priorities } from "../helpers/priorities";
@@ -205,18 +205,7 @@ export default function TaskActions({
   async function duplicateTask() {
     await showToast({ style: Toast.Style.Animated, title: "Duplicating task", message: task.content });
 
-    const payload: AddTaskArgs = {
-      content: task.content,
-      description: task.description,
-      project_id: task.project_id,
-      section_id: task.section_id ? task.section_id : undefined,
-      parent_id: task.parent_id ? task.parent_id : undefined,
-      child_order: task.child_order ? task.child_order : undefined,
-      labels: task.labels,
-      priority: task.priority,
-      due: task.due ? { date: task.due.date } : undefined,
-      responsible_uid: task.responsible_uid ? task.responsible_uid : undefined,
-    };
+    const payload = duplicateTaskPayload(currentTask);
 
     try {
       await addTask(payload, { data, setData });

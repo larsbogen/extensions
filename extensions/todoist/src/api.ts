@@ -9,6 +9,7 @@ import mime from "mime";
 import { Dispatch, SetStateAction } from "react";
 
 import { getTodoistApi } from "./helpers/withTodoistApi";
+import { mergeSyncEntities } from "./helpers/sync";
 
 export let sync_token = "*";
 
@@ -33,6 +34,7 @@ export type Project = {
 
 export type SyncData = {
   sync_token: string;
+  full_sync?: boolean;
   sync_status?: Record<string, "ok" | { error: string }>;
   collaborators: Collaborator[];
   collaborator_states: CollaboratorState[];
@@ -111,11 +113,19 @@ export async function syncRequest(params: Record<string, unknown>) {
   return data;
 }
 
-export async function getFilterTasks(query: string) {
+export async function getFilterTasks(query: string, lang?: string) {
   const todoistApi = getTodoistApi();
   try {
-    const { data } = await todoistApi.get<{ results: Task[] }>("/tasks/filter", { params: { query } });
-    return data.results;
+    const tasks: Task[] = [];
+    let cursor: string | null | undefined;
+    do {
+      const { data } = await todoistApi.get<{ results: Task[]; next_cursor?: string | null }>("/tasks/filter", {
+        params: { query, ...(lang ? { lang } : {}), ...(cursor ? { cursor } : {}) },
+      });
+      tasks.push(...data.results);
+      cursor = data.next_cursor;
+    } while (cursor);
+    return tasks;
   } catch (error) {
     throw new Error("Error fetching filter tasks:" + error);
   }
@@ -194,11 +204,9 @@ export async function updateProject(args: UpdateProjectArgs, { setData }: Cached
     ],
   });
 
-  if (updatedData.projects.length === 0) return;
-
   mergeIntoCachedData(setData, (prev) => ({
     ...prev,
-    projects: prev.projects.map((p) => (p.id === args.id ? updatedData.projects[0] : p)),
+    projects: mergeSyncEntities(prev.projects, updatedData.projects, updatedData.full_sync),
   }));
 }
 
@@ -262,6 +270,7 @@ export type Task = {
   description: string;
   due: Date | null;
   deadline: Deadline | null;
+  duration?: { unit: "minute" | "day"; amount: number } | null;
   priority: number;
   parent_id: string | null;
   child_order: number;
@@ -293,7 +302,10 @@ export async function quickAddTask(args: QuickAddTaskArgs) {
   return data;
 }
 
-export type DateOrString = { date: string; string?: string } | { string: string; date?: string };
+export type DateOrString = ({ date: string; string?: string } | { string: string; date?: string }) & {
+  timezone?: string;
+  lang?: string;
+};
 
 export type AddTaskArgs = {
   content: string;
@@ -357,7 +369,7 @@ export type UpdateTaskArgs = {
 
 /**
  * PATCH task via Sync `item_update`. Returns whether the updated item row was merged into cache.
- * Empty `updatedData.items` is treated as a no-op: cache unchanged, `onSynced` not called.
+ * Merge all returned changes by ID; only invoke `onSynced` for the requested active task.
  */
 export async function updateTask(
   args: UpdateTaskArgs,
@@ -377,19 +389,19 @@ export async function updateTask(
   });
 
   const syncReminders = Array.isArray(updatedData.reminders) ? updatedData.reminders : undefined;
-  const updatedTask = updatedData.items[0];
+  const updatedTask = updatedData.items.find((item) => item.id === args.id && !item.checked && !item.is_deleted);
 
-  if (!cachedData?.setData || updatedData.items.length === 0) {
+  if (!cachedData?.setData) {
     return false;
   }
 
   mergeIntoCachedData(cachedData.setData, (prev) => ({
     ...prev,
-    items: prev.items.map((i) => (i.id === args.id ? updatedData.items[0] : i)),
+    items: mergeSyncEntities(prev.items, updatedData.items, updatedData.full_sync),
     ...(syncReminders !== undefined ? { reminders: mergeSyncedReminders(prev.reminders, syncReminders) } : {}),
   }));
-  onSynced?.({ syncReminders, updatedTask });
-  return true;
+  if (updatedTask) onSynced?.({ syncReminders, updatedTask });
+  return !!updatedTask;
 }
 
 /** Complete task; merges returned items + reminders so recurring tasks show the next due in cache. */
@@ -408,12 +420,8 @@ export async function closeTask(id: string, { setData }: CachedDataParams) {
 
   mergeIntoCachedData(setData, (prev) => {
     const touched = updatedData.items?.find((i) => i.id === id);
-    const items =
-      touched && !touched.checked && !touched.is_deleted
-        ? prev.items.some((i) => i.id === id)
-          ? prev.items.map((i) => (i.id === id ? touched : i))
-          : [...prev.items, touched]
-        : prev.items.filter((i) => i.id !== id);
+    const merged = mergeSyncEntities(prev.items, updatedData.items, updatedData.full_sync);
+    const items = touched && !touched.checked && !touched.is_deleted ? merged : merged.filter((i) => i.id !== id);
     return {
       ...prev,
       ...(Array.isArray(updatedData.reminders)
@@ -463,11 +471,9 @@ export async function moveTask(args: MoveTaskArgs, { setData }: CachedDataParams
     ],
   });
 
-  if (updatedData.items.length === 0) return;
-
   mergeIntoCachedData(setData, (prev) => ({
     ...prev,
-    items: prev.items.map((i) => (i.id === args.id ? updatedData.items[0] : i)),
+    items: mergeSyncEntities(prev.items, updatedData.items, updatedData.full_sync),
   }));
 }
 
@@ -610,11 +616,9 @@ export async function addLabel(args: AddLabelArgs, { setData }: CachedDataParams
       ],
     });
 
-    if (addedData.labels.length === 0) return;
-
     mergeIntoCachedData(setData, (prev) => ({
       ...prev,
-      labels: [...prev.labels, addedData.labels[0]],
+      labels: mergeSyncEntities(prev.labels, addedData.labels, addedData.full_sync),
     }));
   } catch (err) {
     if (err instanceof SyncError && err.tag === "LABEL_ALREADY_EXISTS") {
@@ -645,11 +649,9 @@ export async function updateLabel(args: UpdateLabelArgs, { setData }: CachedData
     ],
   });
 
-  if (updatedData.labels.length === 0) return;
-
   mergeIntoCachedData(setData, (prev) => ({
     ...prev,
-    labels: prev.labels.map((p) => (p.id === args.id ? updatedData.labels[0] : p)),
+    labels: mergeSyncEntities(prev.labels, updatedData.labels, updatedData.full_sync),
   }));
 }
 
@@ -705,11 +707,9 @@ export async function updateFilter(args: UpdateFilterArgs, { setData }: CachedDa
     ],
   });
 
-  if (updatedData.filters.length === 0) return;
-
   mergeIntoCachedData(setData, (prev) => ({
     ...prev,
-    filters: prev.filters.map((p) => (p.id === args.id ? updatedData.filters[0] : p)),
+    filters: mergeSyncEntities(prev.filters, updatedData.filters, updatedData.full_sync),
   }));
 }
 
@@ -808,11 +808,9 @@ export async function updateComment(args: UpdateCommentArgs, { setData }: Cached
     ],
   });
 
-  if (updatedData.notes.length === 0) return;
-
   mergeIntoCachedData(setData, (prev) => ({
     ...prev,
-    notes: prev.notes.map((c) => (c.id === args.id ? updatedData.notes[0] : c)),
+    notes: mergeSyncEntities(prev.notes, updatedData.notes, updatedData.full_sync),
   }));
 }
 

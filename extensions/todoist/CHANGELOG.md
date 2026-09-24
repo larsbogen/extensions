@@ -1,5 +1,12 @@
 # Todoist Changelog
 
+## [Fix pagination, sync merging, and task duplication] - {PR_MERGE_DATE}
+
+- Fetch every result page in filter views, menu bar filters, and the Get Tasks AI tool.
+- Merge sync changes by ID, including unrelated changes and deleted records, instead of relying on response order.
+- Preserve recurrence, timezone, deadline, and duration when duplicating tasks.
+- Add automated regression tests for pagination, sync responses, and task duplication.
+
 ## [Fix Menu Bar task actions in background] - 2026-08-27
 
 - Use background-safe HUD notifications for Menu Bar task actions instead of Toast APIs that can crash the command.
