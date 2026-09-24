@@ -13,3 +13,6 @@ compiled_raycast_rust
 # misc
 .DS_Store
 /.codex
+
+# Local smoke tests and generated PDF previews
+/work/

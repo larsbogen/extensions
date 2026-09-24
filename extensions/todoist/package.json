@@ -284,6 +284,36 @@
       "description": "When a task is chosen as the focused one, you can open it directly using this command.",
       "mode": "no-view",
       "disabledByDefault": true
+    },
+    {
+      "name": "send-daily-plan",
+      "title": "Send dagsplan til reMarkable",
+      "subtitle": "Todoist",
+      "description": "Velg dagens og forfalte oppgaver, forhåndsvis en dagsplan og send PDF-en til reMarkable Cloud. Krever macOS, rm2 og Poppler.",
+      "mode": "view",
+      "preferences": [
+        {
+          "name": "rm2Path",
+          "title": "reMarkable CLI",
+          "description": "Absolutt sti til rm2.",
+          "type": "textfield",
+          "required": false
+        },
+        {
+          "name": "pdfinfoPath",
+          "title": "PDF-info",
+          "description": "Absolutt sti til pdfinfo fra Poppler.",
+          "type": "textfield",
+          "required": false
+        },
+        {
+          "name": "pdftoppmPath",
+          "title": "PDF-rendering",
+          "description": "Absolutt sti til pdftoppm fra Poppler.",
+          "type": "textfield",
+          "required": false
+        }
+      ]
     }
   ],
   "tools": [
@@ -680,6 +710,7 @@
     "form-data": "^4.0.5",
     "lodash": "^4.18.1",
     "mime": "^4.1.0",
+    "pdfkit": "^0.20.2",
     "remove-markdown": "^0.6.4"
   },
   "devDependencies": {
@@ -687,9 +718,11 @@
     "@types/lodash": "^4.17.24",
     "@types/mime": "^4.0.0",
     "@types/node": "^25.9.2",
+    "@types/pdfkit": "^0.17.6",
     "@types/react": "^19.2.17",
     "@types/remove-markdown": "^0.3.4",
     "eslint": "^10.4.1",
+    "pdfjs-dist": "^6.3.289",
     "prettier": "^3.8.4",
     "typescript": "^5.8.3",
     "vitest": "^5.0.1"

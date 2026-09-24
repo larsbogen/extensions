@@ -1,5 +1,13 @@
 # Todoist Changelog
 
+## [Send daily plans to reMarkable] - {PR_MERGE_DATE}
+
+- Add a macOS command to select today’s and overdue Todoist tasks in Europe/Oslo and preview a Norwegian A4 daily plan.
+- Generate PDFs directly with PDFKit, including project groups, subtasks’ parent context, note lines, emoji, and page numbers.
+- Validate every page before a separate Cloud send through rm2; persist document IDs and prevent duplicate or uncertain retries.
+- Add folder creation and automatic destination selection through rm2, including existing-folder reuse and protection against duplicate or uncertain attempts.
+- Add configurable local tool paths, seven-day artifact retention, and automated selection, PDF, process, folder, and upload tests.
+
 ## [Fix pagination, sync merging, and task duplication] - {PR_MERGE_DATE}
 
 - Fetch every result page in filter views, menu bar filters, and the Get Tasks AI tool.
