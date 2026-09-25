@@ -94,6 +94,22 @@ export function rescheduleDuePayload(task: Task, due: DateOrString): DateOrStrin
   return due;
 }
 
+/**
+ * Moves the task's due to today, keeping its time of day and (via `rescheduleDuePayload`) its recurrence rule.
+ * Floating dues stay floating (`YYYY-MM-DDTHH:mm:ss`); fixed-timezone dues (`…Z`) stay UTC.
+ */
+export function rescheduleToTodayPayload(task: Task): DateOrString {
+  const current = task.due?.date;
+  if (!current?.includes("T")) {
+    return rescheduleDuePayload(task, { date: getAPIDate(getToday()) });
+  }
+  const moved = new Date(current);
+  const now = new Date();
+  moved.setFullYear(now.getFullYear(), now.getMonth(), now.getDate());
+  const date = current.endsWith("Z") ? moved.toISOString() : format(moved, "yyyy-MM-dd'T'HH:mm:ss");
+  return rescheduleDuePayload(task, { date });
+}
+
 /** Builds `{ string, date? }` for `item_update` from current task due + optional recurrence rule. */
 export function repeatDuePayload(task: Task, recurrence?: string): DateOrString {
   if (!recurrence) {

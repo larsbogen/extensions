@@ -1,5 +1,9 @@
 # Todoist Changelog
 
+## [Reschedule to Today] - {PR_MERGE_DATE}
+
+- Add a "Reschedule to Today" task action (⌘T) that keeps the recurrence rule and time of day of the task.
+
 ## [Redesign reMarkable daily plan] - {PR_MERGE_DATE}
 
 - Size daily-plan pages to the reMarkable 3:4 screen and bundle Inter instead of relying on macOS Arial.

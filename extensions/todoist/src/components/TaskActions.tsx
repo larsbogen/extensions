@@ -44,6 +44,7 @@ import {
   isHourlyDueString,
   repeatDuePayload,
   rescheduleDuePayload,
+  rescheduleToTodayPayload,
 } from "../helpers/repeat";
 import { ViewMode, getTaskAppUrl, getTaskUrl } from "../helpers/tasks";
 import { QuickLinkView } from "../home";
@@ -287,6 +288,13 @@ export default function TaskActions({
           icon={Icon.Pencil}
           shortcut={{ modifiers: ["cmd"], key: "e" }}
           target={<TaskEdit task={task} />}
+        />
+
+        <Action
+          title="Reschedule to Today"
+          icon={Icon.Calendar}
+          shortcut={{ modifiers: ["cmd"], key: "t" }}
+          onAction={() => updateTask({ id: task.id, due: rescheduleToTodayPayload(currentTask) })}
         />
 
         <ActionPanel.Submenu

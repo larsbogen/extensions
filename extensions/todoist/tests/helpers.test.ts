@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Task } from "../src/api";
 import { duplicateTaskPayload } from "../src/helpers/duplicateTask";
+import { rescheduleToTodayPayload } from "../src/helpers/repeat";
 import { mergeSyncEntities } from "../src/helpers/sync";
+
+vi.mock("@raycast/api", () => ({ Icon: {} }));
 
 function task(overrides: Partial<Task> = {}): Task {
   return {
@@ -97,5 +100,30 @@ describe("sync entity merging", () => {
   it("replaces the active set for a full response, including an empty one", () => {
     expect(mergeSyncEntities([{ id: "stale" }], [{ id: "current" }], true)).toEqual([{ id: "current" }]);
     expect(mergeSyncEntities([{ id: "stale" }], [], true)).toEqual([]);
+  });
+});
+
+describe("reschedule to today", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 25, 14, 30));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps the recurrence rule of an overdue daily task", () => {
+    const due = { date: "2026-09-24", string: "every day", is_recurring: true } as Task["due"];
+    expect(rescheduleToTodayPayload(task({ due }))).toEqual({ date: "2026-09-25", string: "every day" });
+  });
+
+  it("keeps the time of day of a timed recurring task", () => {
+    const due = { date: "2026-09-24T09:00:00", string: "every day at 9", is_recurring: true } as Task["due"];
+    expect(rescheduleToTodayPayload(task({ due }))).toEqual({ date: "2026-09-25T09:00:00", string: "every day at 9" });
+  });
+
+  it("sends only the date for a non-recurring task", () => {
+    const due = { date: "2026-09-20", string: "20 Sep", is_recurring: false } as Task["due"];
+    expect(rescheduleToTodayPayload(task({ due }))).toEqual({ date: "2026-09-25" });
   });
 });
