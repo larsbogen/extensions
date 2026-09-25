@@ -1,5 +1,7 @@
 import { List } from "@raycast/api";
+import { useMemo } from "react";
 
+import { isOverdue } from "../helpers/dates";
 import { SectionWithTasks } from "../helpers/groupBy";
 import { ViewMode } from "../helpers/tasks";
 import { QuickLinkView } from "../home";
@@ -24,6 +26,10 @@ export default function TaskListSections({
   quickLinkView,
 }: TaskListProps) {
   const [data, setData] = useCachedData();
+  const overdueTasks = useMemo(
+    () => sections.flatMap((section) => section.tasks).filter((task) => task.due && isOverdue(task.due.date)),
+    [sections],
+  );
 
   return (
     <>
@@ -43,6 +49,7 @@ export default function TaskListSections({
                   data={data}
                   setData={setData}
                   quickLinkView={quickLinkView}
+                  overdueTasks={overdueTasks}
                 />
               );
             })}

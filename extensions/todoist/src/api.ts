@@ -101,9 +101,9 @@ export async function syncRequest(params: Record<string, unknown>) {
   const { data } = await todoistApi.post<SyncData>("/sync", params);
 
   if (data.sync_status) {
-    const uuid = Object.keys(data.sync_status)[0];
-    if (uuid && data.sync_status[uuid] !== "ok") {
-      const error = data.sync_status[uuid] as { error: string; error_code: number; error_tag?: string };
+    const failed = Object.values(data.sync_status).find((status) => status !== "ok");
+    if (failed) {
+      const error = failed as { error: string; error_code: number; error_tag?: string };
       throw new SyncError(error.error, error.error_code, error.error_tag);
     }
   }
@@ -402,6 +402,29 @@ export async function updateTask(
   }));
   if (updatedTask) onSynced?.({ syncReminders, updatedTask });
   return !!updatedTask;
+}
+
+/** Todoist accepts at most 100 commands per Sync request. */
+const SYNC_COMMAND_LIMIT = 100;
+
+/** Several `item_update`s in as few Sync requests as possible; merges returned items into cache. */
+export async function updateTasks(argsList: UpdateTaskArgs[], { setData }: CachedDataParams) {
+  for (let i = 0; i < argsList.length; i += SYNC_COMMAND_LIMIT) {
+    const updatedData = await syncRequest({
+      sync_token,
+      resource_types: ["items"],
+      commands: argsList.slice(i, i + SYNC_COMMAND_LIMIT).map((args) => ({
+        type: "item_update",
+        uuid: crypto.randomUUID(),
+        args,
+      })),
+    });
+
+    mergeIntoCachedData(setData, (prev) => ({
+      ...prev,
+      items: mergeSyncEntities(prev.items, updatedData.items, updatedData.full_sync),
+    }));
+  }
 }
 
 /** Complete task; merges returned items + reminders so recurring tasks show the next due in cache. */

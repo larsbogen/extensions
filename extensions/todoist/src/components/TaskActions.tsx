@@ -27,6 +27,7 @@ import {
   deleteTask as apiDeleteTask,
   moveTask as apiMoveTask,
   updateTask as apiUpdateTask,
+  updateTasks as apiUpdateTasks,
   closeTask,
 } from "../api";
 import CreateTask from "../create-task";
@@ -68,6 +69,7 @@ type TaskActionsProps = {
   data?: SyncData;
   setData: React.Dispatch<React.SetStateAction<SyncData | undefined>>;
   quickLinkView?: QuickLinkView;
+  overdueTasks?: Task[];
 };
 
 export default function TaskActions({
@@ -78,6 +80,7 @@ export default function TaskActions({
   data,
   setData,
   quickLinkView,
+  overdueTasks,
 }: TaskActionsProps) {
   const { pop } = useNavigation();
   const { useConfetti } = getPreferenceValues<Preferences>();
@@ -141,6 +144,22 @@ export default function TaskActions({
   }
 
   const repeatOptions = [...buildDynamicRepeatOptions(repeatSearchText), ...filterRepeatPresets(repeatSearchText)];
+
+  async function rescheduleAllToToday(tasks: Task[]) {
+    const count = `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`;
+    await showToast({ style: Toast.Style.Animated, title: `Rescheduling ${count}` });
+
+    try {
+      await apiUpdateTasks(
+        tasks.map((task) => ({ id: task.id, due: rescheduleToTodayPayload(task) })),
+        { data, setData },
+      );
+      await showToast({ style: Toast.Style.Success, title: `Rescheduled ${count} to today` });
+      await refreshMenuBarCommand();
+    } catch (error) {
+      await showFailureToast(error, { title: "Unable to reschedule tasks" });
+    }
+  }
 
   async function completeTask(task: Task) {
     await showToast({ style: Toast.Style.Animated, title: "Completing task" });
@@ -296,6 +315,15 @@ export default function TaskActions({
           shortcut={{ modifiers: ["cmd"], key: "t" }}
           onAction={() => updateTask({ id: task.id, due: rescheduleToTodayPayload(currentTask) })}
         />
+
+        {overdueTasks && overdueTasks.length > 0 ? (
+          <Action
+            title="Reschedule All Overdue to Today"
+            icon={Icon.Calendar}
+            shortcut={{ modifiers: ["opt", "cmd"], key: "t" }}
+            onAction={() => rescheduleAllToToday(overdueTasks)}
+          />
+        ) : null}
 
         <ActionPanel.Submenu
           title="Schedule Task"

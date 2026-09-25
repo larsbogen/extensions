@@ -13,6 +13,7 @@ import {
   updateLabel,
   updateProject,
   updateTask,
+  updateTasks,
   type SyncData,
 } from "../src/api";
 
@@ -150,5 +151,47 @@ describe("sync responses", () => {
     client.post.mockResolvedValueOnce({ data: { sync_status: { command: { error: "forbidden", error_code: 403 } } } });
     await expect(updateTask({ id: "a" }, state)).rejects.toThrow("forbidden");
     expect(state.data.items).toEqual([{ id: "a" }]);
+  });
+});
+
+describe("batch task updates", () => {
+  it("sends one command per task in a single request and merges every returned row", async () => {
+    const state = cache({ items: [{ id: "a" }, { id: "b" }, { id: "keep" }] as SyncData["items"] });
+    const a = { id: "a", due: { date: "2026-09-25", string: "every day", is_recurring: true } };
+    const b = { id: "b", due: { date: "2026-09-25", string: "every day", is_recurring: true } };
+    client.post.mockResolvedValueOnce({ data: { sync_token: "next", items: [b, a] } });
+    await updateTasks(
+      [
+        { id: "a", due: { date: "2026-09-25", string: "every day" } },
+        { id: "b", due: { date: "2026-09-25", string: "every day" } },
+      ],
+      state,
+    );
+    expect(client.post).toHaveBeenCalledTimes(1);
+    const { commands } = client.post.mock.calls[0][1];
+    expect(commands.map((c: { type: string; args: { id: string } }) => [c.type, c.args.id])).toEqual([
+      ["item_update", "a"],
+      ["item_update", "b"],
+    ]);
+    expect(state.data.items).toEqual([a, b, { id: "keep" }]);
+  });
+
+  it("splits more than 100 tasks across requests", async () => {
+    const state = cache({ items: [] });
+    client.post.mockResolvedValue({ data: { sync_token: "next", items: [] } });
+    await updateTasks(
+      Array.from({ length: 150 }, (_, i) => ({ id: `${i}` })),
+      state,
+    );
+    expect(client.post.mock.calls.map(([, params]) => params.commands.length)).toEqual([100, 50]);
+  });
+
+  it("fails when any command in the batch is rejected, not only the first", async () => {
+    const state = cache({ items: [{ id: "a" }, { id: "b" }] as SyncData["items"] });
+    client.post.mockResolvedValueOnce({
+      data: { sync_status: { first: "ok", second: { error: "Invalid argument value", error_code: 20 } } },
+    });
+    await expect(updateTasks([{ id: "a" }, { id: "b" }], state)).rejects.toThrow("Invalid argument value");
+    expect(state.data.items).toEqual([{ id: "a" }, { id: "b" }]);
   });
 });

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Task } from "../src/api";
 import { duplicateTaskPayload } from "../src/helpers/duplicateTask";
-import { rescheduleToTodayPayload } from "../src/helpers/repeat";
+import { keepRecurrenceDuePayload, rescheduleToTodayPayload } from "../src/helpers/repeat";
 import { mergeSyncEntities } from "../src/helpers/sync";
 
 vi.mock("@raycast/api", () => ({ Icon: {} }));
@@ -125,5 +125,55 @@ describe("reschedule to today", () => {
   it("sends only the date for a non-recurring task", () => {
     const due = { date: "2026-09-20", string: "20 Sep", is_recurring: false } as Task["due"];
     expect(rescheduleToTodayPayload(task({ due }))).toEqual({ date: "2026-09-25" });
+  });
+});
+
+describe("AI due updates on recurring tasks", () => {
+  const daily = task({ due: { date: "2026-09-24", string: "every day", is_recurring: true } as Task["due"] });
+  const timed = task({
+    due: { date: "2026-09-24T09:00:00", string: "every day at 9", is_recurring: true } as Task["due"],
+  });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 25, 14, 30));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps the rule when the AI says today", () => {
+    expect(keepRecurrenceDuePayload(daily, { string: "today" })).toEqual({ date: "2026-09-25", string: "every day" });
+  });
+
+  it("keeps the rule and the time of day for a date-only move", () => {
+    expect(keepRecurrenceDuePayload(timed, { date: "2026-09-27" })).toEqual({
+      date: "2026-09-27T09:00:00",
+      string: "every day at 9",
+    });
+    expect(keepRecurrenceDuePayload(timed, { string: "Tomorrow" })).toEqual({
+      date: "2026-09-26T09:00:00",
+      string: "every day at 9",
+    });
+  });
+
+  it("uses an explicit time as given", () => {
+    expect(keepRecurrenceDuePayload(timed, { date: "2026-09-26T15:00:00" })).toEqual({
+      date: "2026-09-26T15:00:00",
+      string: "every day at 9",
+    });
+  });
+
+  it("passes a new rule, a cleared date or an unknown phrase through to Todoist", () => {
+    for (const due of [{ string: "every monday" }, { string: "no date" }, { string: "friday at 3pm", lang: "en" }]) {
+      expect(keepRecurrenceDuePayload(daily, due)).toBe(due);
+    }
+  });
+
+  it("leaves non-recurring tasks alone", () => {
+    const due = { string: "today" };
+    expect(
+      keepRecurrenceDuePayload(task({ due: { date: "2026-09-20", is_recurring: false } as Task["due"] }), due),
+    ).toBe(due);
   });
 });

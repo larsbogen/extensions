@@ -7,7 +7,7 @@ import { addDays, format, nextMonday, nextSaturday } from "date-fns";
 
 import type { DateOrString, Task } from "../api";
 
-import { getAPIDate, getToday } from "./dates";
+import { getAPIDate, getToday, parseDay } from "./dates";
 
 export type RecurrenceUnit = "hour" | "day" | "week" | "month" | "year";
 
@@ -40,22 +40,27 @@ function anchorAllDayDateToNow(date: string): string {
   return format(anchor, "yyyy-MM-dd'T'HH:mm:ss");
 }
 
-function resolveDueNlpToDate(nlp: string): string | undefined {
+function resolveDueNlpToDay(nlp: string): Date | undefined {
   const normalized = nlp.trim().toLowerCase();
   const today = getToday();
 
   switch (normalized) {
     case "today":
-      return getAPIDate(today);
+      return today;
     case "tomorrow":
-      return getAPIDate(addDays(today, 1));
+      return addDays(today, 1);
     case "next week":
-      return getAPIDate(nextMonday(today));
+      return nextMonday(today);
     case "next weekend":
-      return getAPIDate(nextSaturday(today));
+      return nextSaturday(today);
     default:
       return undefined;
   }
+}
+
+function resolveDueNlpToDate(nlp: string): string | undefined {
+  const day = resolveDueNlpToDay(nlp);
+  return day && getAPIDate(day);
 }
 
 function attachRecurrenceDate(recurrence: string, date: string): DateOrString {
@@ -95,19 +100,41 @@ export function rescheduleDuePayload(task: Task, due: DateOrString): DateOrStrin
 }
 
 /**
- * Moves the task's due to today, keeping its time of day and (via `rescheduleDuePayload`) its recurrence rule.
+ * Moves the task's due to `day`, keeping its time of day and (via `rescheduleDuePayload`) its recurrence rule.
  * Floating dues stay floating (`YYYY-MM-DDTHH:mm:ss`); fixed-timezone dues (`…Z`) stay UTC.
  */
-export function rescheduleToTodayPayload(task: Task): DateOrString {
+function rescheduleToDayPayload(task: Task, day: Date): DateOrString {
   const current = task.due?.date;
   if (!current?.includes("T")) {
-    return rescheduleDuePayload(task, { date: getAPIDate(getToday()) });
+    return rescheduleDuePayload(task, { date: getAPIDate(day) });
   }
   const moved = new Date(current);
-  const now = new Date();
-  moved.setFullYear(now.getFullYear(), now.getMonth(), now.getDate());
+  moved.setFullYear(day.getFullYear(), day.getMonth(), day.getDate());
   const date = current.endsWith("Z") ? moved.toISOString() : format(moved, "yyyy-MM-dd'T'HH:mm:ss");
   return rescheduleDuePayload(task, { date });
+}
+
+export function rescheduleToTodayPayload(task: Task): DateOrString {
+  return rescheduleToDayPayload(task, getToday());
+}
+
+/**
+ * Due payload for callers that may send a plain date to a recurring task (AI tools), where Todoist would
+ * otherwise replace the recurrence rule. Keeps the rule and time of day for `{ date: "YYYY-MM-DD" }` and for
+ * `today` / `tomorrow` / `next week` / `next weekend`; a timed `date` is used as given. Any other `string`
+ * passes through untouched, since it may be a new rule ("every monday").
+ */
+export function keepRecurrenceDuePayload(task: Task, due: DateOrString): DateOrString {
+  if (!task.due?.is_recurring) return due;
+
+  if (due.string?.trim()) {
+    const day = resolveDueNlpToDay(due.string);
+    return day ? rescheduleToDayPayload(task, day) : due;
+  }
+
+  if (!due.date) return due;
+  if (due.date.includes("T")) return rescheduleDuePayload(task, { date: due.date });
+  return rescheduleToDayPayload(task, parseDay(due.date));
 }
 
 /** Builds `{ string, date? }` for `item_update` from current task due + optional recurrence rule. */

@@ -22,6 +22,8 @@ type TaskListItemProps = {
   data?: SyncData;
   setData: React.Dispatch<React.SetStateAction<SyncData | undefined>>;
   quickLinkView?: QuickLinkView;
+  /** Overdue tasks in the surrounding view, for "Reschedule All Overdue to Today". */
+  overdueTasks?: Task[];
 };
 
 export default function TaskListItem({
@@ -32,6 +34,7 @@ export default function TaskListItem({
   data,
   setData,
   quickLinkView,
+  overdueTasks,
 }: TaskListItemProps) {
   const taskComments = data?.notes.filter((note) => note.item_id === task.id);
   const accessories: List.Item.Accessory[] = [];
@@ -176,6 +179,7 @@ export default function TaskListItem({
             data={data}
             setData={setData}
             quickLinkView={quickLinkView}
+            overdueTasks={overdueTasks}
           />
         </ActionPanel>
       }

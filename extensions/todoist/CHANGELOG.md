@@ -3,6 +3,8 @@
 ## [Reschedule to Today] - {PR_MERGE_DATE}
 
 - Add a "Reschedule to Today" task action (⌘T) that keeps the recurrence rule and time of day of the task.
+- Add "Reschedule All Overdue to Today" (⌥⌘T) to move every overdue task in the current view in one request.
+- Keep the recurrence rule when the AI "Update Task" tool moves a recurring task to a new date, unless asked to stop repeating.
 
 ## [Redesign reMarkable daily plan] - {PR_MERGE_DATE}
 

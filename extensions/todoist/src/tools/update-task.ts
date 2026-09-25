@@ -1,8 +1,9 @@
 import crypto from "crypto";
 
-import { sync_token, syncRequest } from "../api";
+import { DateOrString, Task, sync_token, syncRequest } from "../api";
 import { priorities, mapPriority } from "../helpers/priorities";
 import { parseOptionalStringList } from "../helpers/parseStringList";
+import { keepRecurrenceDuePayload } from "../helpers/repeat";
 import { withTodoistApi } from "../helpers/withTodoistApi";
 
 type Input = {
@@ -56,6 +57,11 @@ type Input = {
    *
    * While you can use explicit date formats with the `date` property, the string format
    * is recommended as it's more intuitive and leverages Todoist's powerful natural language processing.
+   *
+   * Recurring tasks (`due.is_recurring`): a new date moves only the next occurrence and keeps the
+   * recurrence rule and time of day. Use `date` ("YYYY-MM-DD") or one of the strings "today", "tomorrow",
+   * "next week" or "next weekend" for that. Any other `string` replaces the rule, so only send one to change
+   * the rule itself (e.g. "every monday"). To turn the task into a one-off task instead, set `stop_repeating`.
    */
   due?: {
     string?: string;
@@ -80,6 +86,11 @@ type Input = {
       | "tw";
     date?: string; // Available but string format is recommended
   };
+  /**
+   * Only for recurring tasks: set to true to make the new `due` a one-off date instead of moving the next
+   * occurrence. Leave unset to keep the task repeating.
+   */
+  stop_repeating?: boolean;
   /**
    * The deadline of the task in the format YYYY-MM-DD (RFC 3339)
    */
@@ -112,10 +123,26 @@ type Input = {
   day_order?: number;
 };
 
+async function getTask(id: string) {
+  const { items } = await syncRequest({
+    sync_token,
+    resource_types: ["items"],
+  });
+  return items.find((t) => t.id === id);
+}
+
+/** Todoist replaces a recurrence rule on any plain date, so keep it unless the caller asked to stop repeating. */
+function nextDue(task: Task | undefined, due: Input["due"], stopRepeating?: boolean) {
+  if (!due || !task || stopRepeating) return due;
+  return keepRecurrenceDuePayload(task, due as DateOrString);
+}
+
 export default withTodoistApi(async function (input: Input) {
-  const { labels, ...taskInput } = input;
+  const { labels, stop_repeating, due, ...taskInput } = input;
+  const task = due && !stop_repeating ? await getTask(input.id) : undefined;
   const args = {
     ...taskInput,
+    ...(due ? { due: nextDue(task, due, stop_repeating) } : {}),
     priority: mapPriority(taskInput.priority),
     ...(labels ? { labels: parseOptionalStringList(labels) } : {}),
   };
@@ -146,13 +173,9 @@ export const confirmation = withTodoistApi(
     assigned_by_uid,
     responsible_uid,
     day_order,
+    stop_repeating,
   }: Input) => {
-    const { items } = await syncRequest({
-      sync_token,
-      resource_types: ["items"],
-    });
-
-    const task = items.find((t) => t.id === id);
+    const task = await getTask(id);
     const info = [{ name: "Task", value: task?.content }];
 
     if (content) {
@@ -165,6 +188,11 @@ export const confirmation = withTodoistApi(
       info.push({ name: "New Due Date", value: due.string });
     } else if (due?.date) {
       info.push({ name: "New Due Date", value: due.date });
+    }
+    if (due && task?.due?.is_recurring) {
+      const rule = task.due.string;
+      const kept = nextDue(task, due, stop_repeating)?.string === rule;
+      info.push({ name: kept ? "Keeps Repeat" : "Replaces Repeat", value: rule });
     }
     if (deadline?.date) {
       info.push({ name: "New Deadline", value: deadline.date });
