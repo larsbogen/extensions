@@ -1,5 +1,11 @@
 # Todoist Changelog
 
+## [Redesign reMarkable daily plan] - {PR_MERGE_DATE}
+
+- Size daily-plan pages to the reMarkable 3:4 screen and bundle Inter instead of relying on macOS Arial.
+- Add a dated masthead with week, overdue count and total estimate, plus handwritten top-three focus lines and a timeline of today’s timed tasks.
+- Show priority as filled circles, overdue tasks as a black tag, subtasks nested under their parent, larger checkboxes, and a dotted notes column and notes page.
+
 ## [Fix stale reMarkable folder listings] - {PR_MERGE_DATE}
 
 - Reconcile folder listings with the live Cloud sync index so newly created folders appear and can be reused without duplicates.

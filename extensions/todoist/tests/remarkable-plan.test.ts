@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Project, Task } from "../src/api";
-import { createSnapshot, dailyTasks, dateParts, osloDay } from "../src/remarkable/plan";
+import { createSnapshot, dailyTasks, dateParts, nestTasks, osloDay } from "../src/remarkable/plan";
 import { planMarkdown } from "../src/remarkable/markdown";
 
 const projects = [
@@ -77,6 +77,28 @@ describe("Oslo daily selection", () => {
     );
     expect(result).toHaveLength(1);
     expect(result[0].parentTitle).toBe("parent");
+    expect(result[0].parentId).toBe("parent");
+  });
+  it("nests selected subtasks below their parent without dropping or reordering other tasks", () => {
+    const result = dailyTasks(
+      [
+        task("child", { priority: 4, parent_id: "parent" }),
+        task("other"),
+        task("parent"),
+        task("grandchild", { parent_id: "child" }),
+        task("elsewhere", { project_id: "work", parent_id: "parent" }),
+      ],
+      projects,
+      "me",
+      now,
+    );
+    expect(nestTasks(result).map(({ task, depth }) => `${task.id}:${depth}`)).toEqual([
+      "other:0",
+      "parent:0",
+      "child:1",
+      "grandchild:2",
+      "elsewhere:0",
+    ]);
   });
 });
 

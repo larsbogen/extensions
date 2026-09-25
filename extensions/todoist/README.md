@@ -63,11 +63,18 @@ Todoist-data leses på nytt både når kommandoen åpnes og når forhåndsvisnin
    reMarkable**. Bekreftet sending viser dokumentnavn og dokument-ID.
 
 PDFKit genererer dokumentet direkte i utvidelsen, uten Marked, AppleScript eller
-Python som PDF-motor. Dokumentet har A4 stående, en Swiss-inspirert Arial-layout,
-12-punkts oppgavetekst, avkrysningsbokser, to notatlinjer per oppgave, åtte generelle
-notatlinjer og sidetall. Lange titler brytes. Oppgavetekst behandles bokstavelig;
-HTML og Markdown kan ikke endre dokumentets mal. Noto Emoji gir svarte/hvite
-emojis. Skriftene bygges inn i PDF-en.
+Python som PDF-motor. Sidene har reMarkable-skjermens 3:4-format (447 × 596 pt), så
+de fyller skjermen uten skalering, og venstremargen gir plass til verktøylinjen.
+Første side har ukedag og dato, antall oppgaver, antall forfalte og samlet
+estimert tid, tre linjer for **Dagens fokus** og en **tidslinje** med dagens
+oppgaver som har klokkeslett. Oppgavelisten er gruppert per prosjekt, med store
+avkrysningsbokser, prioritet som fylte/halvfylte/tomme sirkler (P4 vises ikke),
+svart **FORFALT**-merke og underoppgaver innrykket under forelderen. En
+prikkekolonne til høyre gir plass til notater ved hver oppgave, og dokumentet
+avsluttes med en notatflate i prikkenett. Lange titler brytes; bare tidslinjen
+forkorter tekst. Oppgavetekst behandles bokstavelig; HTML og Markdown kan ikke
+endre dokumentets mal. Inter brukes til tekst og Noto Emoji til svarte/hvite
+emojis. Skriftene følger med utvidelsen og bygges inn i PDF-en.
 
 ### Lokalt oppsett
 
@@ -86,7 +93,7 @@ emojis. Skriftene bygges inn i PDF-en.
 Kommandoens innstillinger kan overstyre absolutte stier til `rm2`, `pdfinfo` og
 `pdftoppm`. Standardene søker i Homebrew, PATH og den lokale rm2-installasjonen
 under `~/Library/Python/3.9/bin`. Poppler fra den lokale Codex-runtime-installasjonen
-brukes som reserve når den finnes. Arial leses fra macOS' installerte skrifter.
+brukes som reserve når den finnes.
 Ingen innloggingshemmeligheter lagres eller logges av denne kommandoen.
 
 ### Forhåndsvisning, nytt forsøk og lokale filer
@@ -116,10 +123,10 @@ Todoist-oppgaver opprettes eller endres. Automatisk sending og USB/SSH inngår i
 ### Utvikling og kontroll
 
 `npm test` inkluderer simulerte prosessvar for Cloud og Poppler, dato-/utvalgstester
-og tester som leser faktiske genererte PDF-er med PDF.js. PDF-testene bruker macOS'
-Arial-skrifter og kjøres derfor bare på macOS. Ingen automatiserte tester sender
+og tester som leser faktiske genererte PDF-er med PDF.js. Ingen automatiserte tester sender
 noe til reMarkable. Kontroller lokalt med `npm run dev`: utvalg → mappe → PDF →
 forhåndsvisning. En faktisk sending utføres først når brukeren velger sendehandlingen.
 
 Den inkluderte [Noto Emoji-fonten](https://github.com/google/fonts/tree/main/ofl/notoemoji)
-er distribuert under SIL Open Font License; se `assets/daily-plan/OFL.txt`.
+og [Inter](https://github.com/rsms/inter) er distribuert under SIL Open Font License;
+se `assets/daily-plan/OFL.txt` og `assets/daily-plan/Inter-OFL.txt`.

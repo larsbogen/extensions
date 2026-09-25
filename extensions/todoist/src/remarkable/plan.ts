@@ -5,6 +5,7 @@ export const TIME_ZONE = "Europe/Oslo";
 export type PlanTask = {
   id: string;
   title: string;
+  parentId?: string;
   parentTitle?: string;
   projectId: string;
   projectName: string;
@@ -104,6 +105,7 @@ export function dailyTasks(tasks: Task[], projects: Project[], userId: string, n
     .map(({ t, due, deadline }) => ({
       id: t.id,
       title: t.content,
+      parentId: t.parent_id ?? undefined,
       parentTitle: t.parent_id ? byId.get(t.parent_id)?.content : undefined,
       projectId: t.project_id,
       projectName: projectNames.get(t.project_id) ?? "Ukjent prosjekt",
@@ -137,4 +139,25 @@ export function createSnapshot(tasks: PlanTask[], selected: Set<string>, now = n
     name: `Dagsplan – ${day} – ${time}`,
     tasks: chosen.map((t) => ({ ...t })),
   };
+}
+
+/** Places selected subtasks directly below their selected parent; other tasks keep snapshot order. */
+export function nestTasks(tasks: PlanTask[]): { task: PlanTask; depth: number }[] {
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const nested = (task: PlanTask) => {
+    const parent = task.parentId ? byId.get(task.parentId) : undefined;
+    return parent !== undefined && parent !== task && parent.projectId === task.projectId;
+  };
+  const result: { task: PlanTask; depth: number }[] = [];
+  const placed = new Set<string>();
+  function place(task: PlanTask, depth: number) {
+    if (placed.has(task.id)) return;
+    placed.add(task.id);
+    result.push({ task, depth });
+    tasks.filter((child) => child.parentId === task.id && nested(child)).forEach((child) => place(child, depth + 1));
+  }
+  tasks.filter((task) => !nested(task)).forEach((task) => place(task, 0));
+  // A parent cycle cannot come from Todoist, but must never drop a task.
+  tasks.forEach((task) => place(task, 0));
+  return result;
 }

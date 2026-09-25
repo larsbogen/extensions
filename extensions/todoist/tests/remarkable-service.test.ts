@@ -22,7 +22,7 @@ const snapshot = () =>
     [{ id: "a", title: "Oppgave", projectId: "p", projectName: "Hjem", priority: 1, overdue: false }],
     new Set(["a"]),
   );
-const info = "Pages: 2\nPage 1 size: 595.28 x 841.89 pts (A4)\nPage 2 size: 595.28 x 841.89 pts (A4)\n";
+const info = "Pages: 2\nPage 1 size: 447 x 596 pts\nPage 2 size: 447 x 596 pts\n";
 const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j1ioAAAAASUVORK5CYII=",
   "base64",
@@ -78,12 +78,13 @@ describe("setup and PDF validation", () => {
   it.each([
     "Pages: 0",
     "not a PDF",
-    info.replace("841.89", "700.00"),
-    "Pages: 2\nPage 1 size: 595.28 x 841.89 pts (A4)\n",
+    info.replace("596", "700"),
+    "Pages: 2\nPage 1 size: 595.28 x 841.89 pts (A4)\nPage 2 size: 595.28 x 841.89 pts (A4)\n",
+    "Pages: 2\nPage 1 size: 447 x 596 pts\n",
   ])("rejects invalid or mixed-size PDF information", (value) => {
     expect(() => validatePdfInfo(value, 2)).toThrow();
   });
-  it("accepts every A4 page", () => {
+  it("accepts every reMarkable-sized page", () => {
     expect(validatePdfInfo(info, 2)).toBe(2);
   });
 });

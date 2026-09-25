@@ -30,33 +30,52 @@ async function generate(tasks: PlanTask[]) {
   await createPlanPdf(
     createSnapshot(tasks, new Set(tasks.map((t) => t.id)), new Date("2026-09-24T12:00:00Z")),
     file,
-    path.resolve("assets/daily-plan/NotoEmoji.ttf"),
+    path.resolve("assets/daily-plan"),
   );
   loading = getDocument({ data: new Uint8Array(await readFile(file)), isEvalSupported: false });
   return await loading.promise;
 }
-// These integration tests use the same installed macOS fonts as the macOS-only command.
-describe.skipIf(process.platform !== "darwin")("actual generated PDF", () => {
-  it("preserves Norwegian, emoji and literal text across A4 pages with a footer on every page", async () => {
+// Letter-spaced labels are extracted with gaps between letters.
+const squash = (text: string) => text.replace(/\s+/g, "");
+async function pageTexts(result: Awaited<ReturnType<typeof generate>>) {
+  const texts: string[] = [];
+  for (let i = 1; i <= result.numPages; i++) {
+    const content = await (await result.getPage(i)).getTextContent();
+    texts.push(
+      content.items
+        .filter((item) => "str" in item)
+        .map((item) => item.str)
+        .join(" "),
+    );
+  }
+  return texts;
+}
+describe("actual generated PDF", () => {
+  it("preserves Norwegian, emoji and literal text across reMarkable pages with a footer on every page", async () => {
     const tasks = Array.from({ length: 13 }, (_, i) => task(i));
     tasks[2].title = "Ærlig <script>hei</script> **tekst** & [lenke](url) 👨‍👩‍👧‍👦";
     tasks[3].parentTitle = "Forelder uten egen oppgave";
+    tasks[5].overdue = true;
+    tasks[5].due = "2026-09-20";
     tasks[4].title = "En lang tittel som må brytes over flere linjer ".repeat(9);
+    // Keep the title out of the timeline so every occurrence below comes from the task list.
+    tasks[4].dueTime = undefined;
     const result = await generate(tasks);
     expect(result.numPages).toBeGreaterThan(2);
     let allText = "";
     for (let i = 1; i <= result.numPages; i++) {
       const page = await result.getPage(i);
-      expect(page.view).toEqual([0, 0, 595.28, 841.89]);
+      expect(page.view).toEqual([0, 0, 447, 596]);
       const content = await page.getTextContent();
       const items = content.items.filter((item) => "str" in item);
       const text = items.map((item) => item.str).join(" ");
       expect(text).toContain(`${i} / ${result.numPages}`);
+      expect(text).toContain("Torsdag 24.09");
       for (const item of items) {
         expect(item.transform[4]).toBeGreaterThanOrEqual(39);
-        expect(item.transform[4] + item.width).toBeLessThanOrEqual(557);
+        expect(item.transform[4] + item.width).toBeLessThanOrEqual(420);
         expect(item.transform[5]).toBeGreaterThan(15);
-        expect(item.transform[5]).toBeLessThan(810);
+        expect(item.transform[5]).toBeLessThan(570);
       }
       allText += text;
     }
@@ -65,8 +84,16 @@ describe.skipIf(process.platform !== "darwin")("actual generated PDF", () => {
     expect(allText).toContain("🛒");
     expect(allText).toContain("æ, ø og å");
     expect(allText).toContain("Forelder uten egen oppgave");
-    expect(allText).toContain("Deadline: 2026-09-25");
-    expect(allText).toContain("Notater");
+    expect(squash(allText)).toContain("DAGSPLAN·UKE39");
+    expect(allText).toContain("Torsdag 24. september");
+    expect(allText).toContain("13 oppgaver · 1 forfalt · ca. 6 t 30 min estimert");
+    expect(squash(allText)).toContain("DAGENSFOKUS");
+    expect(squash(allText)).toContain("TIDSLINJE");
+    expect(squash(allText)).toContain("FORFALT");
+    expect(allText).toContain("kl. 09:30 · 30 min · Frist 25.09");
+    expect(allText).toContain("20.09 kl. 09:30");
+    expect(allText).not.toContain("P1");
+    expect(squash(allText)).toContain("NOTATER");
     expect(allText.match(/En lang tittel/g)).toHaveLength(9);
   });
   it("wraps unbroken text and a task taller than a page without losing its ending", async () => {
@@ -84,6 +111,28 @@ describe.skipIf(process.platform !== "darwin")("actual generated PDF", () => {
     }
     expect(result.numPages).toBeGreaterThan(2);
     expect(text).toContain("SLUTTMERKE");
-    expect(text).toContain("Notater");
+    expect(squash(text)).toContain("NOTATER");
+  });
+  it("nests selected subtasks under their parent and captions subtasks whose parent is not in the plan", async () => {
+    const tasks = [task(0), task(1), task(2)];
+    tasks[0].title = "Barn";
+    tasks[0].parentId = "2";
+    tasks[0].parentTitle = "Forelder";
+    tasks[1].title = "Foreldreløs";
+    tasks[1].parentId = "missing";
+    tasks[1].parentTitle = "Utenfor planen";
+    tasks[2].title = "Forelder";
+    const [text] = await pageTexts(await generate(tasks));
+    expect(text.indexOf("Forelder")).toBeLessThan(text.lastIndexOf("Barn"));
+    expect(text).toContain("↳ Utenfor planen");
+    expect(text).not.toContain("↳ Forelder");
+  });
+  it("places only today's timed tasks in the timeline and summarises the rest", async () => {
+    const tasks = Array.from({ length: 14 }, (_, i) => ({ ...task(i), title: `Møte ${i}`, dueTime: "09:00" }));
+    tasks[0].due = "2026-09-23";
+    const [first] = await pageTexts(await generate(tasks));
+    expect(first).toMatch(/09:00\s+Møte 1 /);
+    expect(first).not.toMatch(/09:00\s+Møte 0 /);
+    expect(first).toMatch(/\+ \d+ til i listen/);
   });
 });

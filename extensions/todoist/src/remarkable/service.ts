@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { PlanSnapshot } from "./plan";
-import type { PdfRenderer } from "./pdf";
+import { PAGE_SIZE, type PdfRenderer } from "./pdf";
 import { planMarkdown } from "./markdown";
 import { runProcess, type Runner } from "./process";
 
@@ -109,9 +109,9 @@ export function validatePdfInfo(output: string, expectedPages?: number): number 
     if (
       sizes.length !== pages ||
       new Set(sizes.map((m) => m[1])).size !== pages ||
-      sizes.some((m) => Math.abs(Number(m[2]) - 595.28) > 2 || Math.abs(Number(m[3]) - 841.89) > 2)
+      sizes.some((m) => Math.abs(Number(m[2]) - PAGE_SIZE[0]) > 2 || Math.abs(Number(m[3]) - PAGE_SIZE[1]) > 2)
     ) {
-      throw new Error("Alle PDF-sider må være A4 stående.");
+      throw new Error("Alle PDF-sider må ha reMarkable-format (3:4, stående).");
     }
   }
   return pages;

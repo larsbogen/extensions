@@ -185,7 +185,7 @@ export function DailyPlanCommand() {
   const service = useMemo(
     () =>
       new DailyPlanService(path.join(environment.supportPath, "daily-plans"), prefs, (snapshot, output) =>
-        createPlanPdf(snapshot, output, path.join(environment.assetsPath, "daily-plan", "NotoEmoji.ttf")),
+        createPlanPdf(snapshot, output, path.join(environment.assetsPath, "daily-plan")),
       ),
     [prefs.rm2Path, prefs.pdfinfoPath, prefs.pdftoppmPath],
   );
