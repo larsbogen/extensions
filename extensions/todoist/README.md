@@ -44,6 +44,42 @@ Tests use simulated API responses and do not access a Todoist account.
 To load the fork locally in Raycast, run `npm run dev`. Authenticate in Raycast when prompted.
 The distribution build is written to `dist/`; building and testing do not install the fork or change the Store version.
 
+### Automatisk lokal oppdatering på macOS
+
+Kjør dette fra `extensions/todoist` for å installere en LaunchAgent for din bruker:
+
+```sh
+npm run local:install
+```
+
+Tjenesten starter med en gang og ved innlogging, og kjører `ray develop` i
+bakgrunnen. Den overvåker dette prosjektets kildekode, assets og manifest og
+bygger den lokale Raycast-utvidelsen ved endringer. Aktiver **Raycast Settings →
+Extensions → Developer → Auto-reload on save** for automatisk omlasting av åpne
+kommandoer. Bruk den lokale Todoist-versjonen og knytt hurtigtastene til den.
+Stopp eventuelle manuelle `npm run dev`-prosesser før installasjon; ikke kjør en
+ekstra utviklingsprosess mens tjenesten er aktiv.
+
+```sh
+npm run local:status     # Vis prosessstatus
+npm run local:restart    # Start prosessen på nytt
+npm run local:stop       # Stopp frem til neste innlogging eller local:start
+npm run local:start      # Start igjen
+npm run local:uninstall  # Fjern automatisk oppstart, behold utvidelsen
+```
+
+Oppsettet ligger i `~/Library/LaunchAgents/local.raycast.todoist.dev.plist`.
+Byggelogger ligger i `~/Library/Logs/local.raycast.todoist.dev/` (`output.log`
+og `error.log`). Loggene roteres ikke automatisk; de kan tømmes ved behov etter
+at tjenesten er stoppet. Avinstallering beholder loggene og den sist bygde
+utvidelsen. Ingen administratorrettigheter kreves.
+
+Kjør `npm ci` og `npm run local:restart` etter endringer i avhengigheter.
+Hvis prosjektet flyttes eller Node-installasjonen byttes, kjør
+`npm run local:install` på nytt fra den nye plasseringen. Homebrew sin stabile
+Node-sti brukes når den er tilgjengelig. Oppsettet erstatter ikke tester, lint
+eller produksjonsbygg; en vellykket utviklingsbygging er ikke en full typesjekk.
+
 ## Dagsplan til reMarkable (macOS)
 
 Kommandoen **Send dagsplan til reMarkable** lager en norsk dagsplan med dagens og
