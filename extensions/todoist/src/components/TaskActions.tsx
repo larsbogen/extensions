@@ -32,7 +32,7 @@ import {
 } from "../api";
 import CreateTask from "../create-task";
 import { getCollaboratorIcon, getProjectCollaborators } from "../helpers/collaborators";
-import { getAPIDate } from "../helpers/dates";
+import { getAPIDate, getToday } from "../helpers/dates";
 import { duplicateTaskPayload } from "../helpers/duplicateTask";
 import { getRemainingLabels, getTaskLabels } from "../helpers/labels";
 import { refreshMenuBarCommand } from "../helpers/menu-bar";
@@ -45,8 +45,10 @@ import {
   isHourlyDueString,
   repeatDuePayload,
   rescheduleDuePayload,
+  rescheduleToDayPayload,
   rescheduleToTodayPayload,
 } from "../helpers/repeat";
+import { getScheduleOptions } from "../helpers/schedule";
 import { ViewMode, getTaskAppUrl, getTaskUrl } from "../helpers/tasks";
 import { QuickLinkView } from "../home";
 import { useFocusedTask } from "../hooks/useFocusedTask";
@@ -94,6 +96,7 @@ export default function TaskActions({
   const taskLabels = task && data?.labels ? getTaskLabels(task, data.labels) : [];
   const remainingLabels = task && data?.labels ? getRemainingLabels(task, data.labels) : [];
   const [repeatSearchText, setRepeatSearchText] = useState("");
+  const [scheduleToday, setScheduleToday] = useState(getToday);
 
   /**
    * Wrapper around sync `updateTask`: returns whether Todoist returned an item row that we merged into cache.
@@ -326,43 +329,66 @@ export default function TaskActions({
           />
         ) : null}
 
-        <ActionPanel.Submenu
+        <LazySubmenu
           title="Schedule Task"
           icon={Icon.Calendar}
           shortcut={{ modifiers: ["cmd", "shift"], key: "s" }}
+          onOpen={() => setScheduleToday(getToday())}
         >
-          <Action.PickDate
-            title="Pick Date"
-            type={Action.PickDate.Type.DateTime}
-            onChange={async (date) => {
-              const due = date
-                ? rescheduleDuePayload(currentTask, {
-                    date: Action.PickDate.isFullDay(date) ? getAPIDate(date) : date.toISOString(),
-                  })
-                : { string: "no date" };
-              let syncReminders: Reminder[] | undefined;
-              const merged = await updateTask({ id: task.id, due }, (ctx) => {
-                syncReminders = ctx.syncReminders;
-              });
-              if (!merged) return;
-              if (date && !Action.PickDate.isFullDay(date)) await ensureAtTaskTimeReminder(task.id, syncReminders);
-            }}
-          />
-          <ActionPanel.Submenu
-            title="Set Repeat"
-            icon={Icon.Repeat}
-            filtering={false}
-            onOpen={() => setRepeatSearchText("")}
-            onSearchTextChange={setRepeatSearchText}
-          >
-            {(!repeatSearchText.trim() || repeatSearchText.toLowerCase().includes("no repeat")) && (
-              <Action title="No Repeat" icon={Icon.XMarkCircle} onAction={() => setRecurrence()} />
-            )}
-            {repeatOptions.map(({ key, title, icon, recurrence }) => (
-              <Action key={key} title={title} icon={icon} onAction={() => setRecurrence(recurrence)} />
-            ))}
-          </ActionPanel.Submenu>
-        </ActionPanel.Submenu>
+          {() => (
+            <>
+              <ActionPanel.Section>
+                {getScheduleOptions(data?.user, scheduleToday).map(({ key, title, icon, date }) => (
+                  <Action
+                    key={key}
+                    title={title}
+                    icon={icon}
+                    onAction={() =>
+                      updateTask({
+                        id: task.id,
+                        due: date ? rescheduleToDayPayload(currentTask, date) : { string: "no date" },
+                      })
+                    }
+                  />
+                ))}
+              </ActionPanel.Section>
+              <ActionPanel.Section>
+                <Action.PickDate
+                  title="Pick Date"
+                  type={Action.PickDate.Type.DateTime}
+                  onChange={async (date) => {
+                    const due = date
+                      ? rescheduleDuePayload(currentTask, {
+                          date: Action.PickDate.isFullDay(date) ? getAPIDate(date) : date.toISOString(),
+                        })
+                      : { string: "no date" };
+                    let syncReminders: Reminder[] | undefined;
+                    const merged = await updateTask({ id: task.id, due }, (ctx) => {
+                      syncReminders = ctx.syncReminders;
+                    });
+                    if (!merged) return;
+                    if (date && !Action.PickDate.isFullDay(date))
+                      await ensureAtTaskTimeReminder(task.id, syncReminders);
+                  }}
+                />
+                <ActionPanel.Submenu
+                  title="Set Repeat"
+                  icon={Icon.Repeat}
+                  filtering={false}
+                  onOpen={() => setRepeatSearchText("")}
+                  onSearchTextChange={setRepeatSearchText}
+                >
+                  {(!repeatSearchText.trim() || repeatSearchText.toLowerCase().includes("no repeat")) && (
+                    <Action title="No Repeat" icon={Icon.XMarkCircle} onAction={() => setRecurrence()} />
+                  )}
+                  {repeatOptions.map(({ key, title, icon, recurrence }) => (
+                    <Action key={key} title={title} icon={icon} onAction={() => setRecurrence(recurrence)} />
+                  ))}
+                </ActionPanel.Submenu>
+              </ActionPanel.Section>
+            </>
+          )}
+        </LazySubmenu>
 
         {data?.user?.premium_status !== "not_premium" ? (
           <Action.PickDate

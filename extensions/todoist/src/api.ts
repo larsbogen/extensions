@@ -879,6 +879,9 @@ export type User = {
   id: string;
   is_premium: boolean;
   time_format: number;
+  next_week?: number;
+  weekend_start_day?: number;
+  start_day?: number;
   premium_status: "not_premium" | "current_personal_plan" | "active_business_account" | "teams_business_account";
 };
 

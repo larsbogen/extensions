@@ -103,7 +103,7 @@ export function rescheduleDuePayload(task: Task, due: DateOrString): DateOrStrin
  * Moves the task's due to `day`, keeping its time of day and (via `rescheduleDuePayload`) its recurrence rule.
  * Floating dues stay floating (`YYYY-MM-DDTHH:mm:ss`); fixed-timezone dues (`…Z`) stay UTC.
  */
-function rescheduleToDayPayload(task: Task, day: Date): DateOrString {
+export function rescheduleToDayPayload(task: Task, day: Date): DateOrString {
   const current = task.due?.date;
   if (!current?.includes("T")) {
     return rescheduleDuePayload(task, { date: getAPIDate(day) });

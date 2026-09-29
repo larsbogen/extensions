@@ -1,5 +1,11 @@
 # Todoist Changelog
 
+## [Quick date choices when scheduling tasks] - {PR_MERGE_DATE}
+
+- Add Today, Tomorrow, Later This Week, This Weekend, Next Week and No Date to Schedule Task, with the target dates displayed in the menu.
+- Use the account's next-week and weekend settings and keep the existing time and recurrence when moving a task.
+- Keep Pick Date and Set Repeat available below the shortcuts.
+
 ## [Fix out-of-memory crash when scrolling tasks] - {PR_MERGE_DATE}
 
 - Fix "Command Out of Memory" when moving quickly through task lists: selecting a task no longer re-reads and parses the whole cached Todoist data or lists every installed application.

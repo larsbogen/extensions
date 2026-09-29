@@ -15,6 +15,19 @@ You can quickly access your `Home` command favorites views using deep-links and 
 
 This makes it easy to access any of your views, including projects and labels!
 
+## Quick date choices
+
+Open **Schedule Task** (`⌘⇧S`) on a task to choose **Today**, **Tomorrow**,
+**Later This Week**, **This Weekend**, **Next Week**, or **No Date**. Each dated
+choice shows its target day and date. Moving a task keeps its time and recurrence;
+**No Date** removes its date and recurrence. **Pick Date** and **Set Repeat**
+remain available below the shortcuts.
+
+**Later This Week** means two days from today and is hidden if that falls in the
+next week. The weekend and next-week choices use your Todoist date settings
+(Saturday and Monday by default); a weekend that has passed is labeled **Next
+Weekend**.
+
 ## Disabled Commands
 
 This extension includes a few commands that are disabled by default. You can enable them by going to the extension's settings. These commands are:
