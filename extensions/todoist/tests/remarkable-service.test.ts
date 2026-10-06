@@ -7,6 +7,7 @@ import {
   DailyPlanService,
   parseFolders,
   resolveTools,
+  shouldResumePreview,
   validatePdfInfo,
   type Folder,
   type ToolPreferences,
@@ -398,4 +399,38 @@ it("explains when fresh folder listing needs renewed upload authentication", () 
   expect(() =>
     parseFolders(JSON.stringify({ protocol_version: 1, ok: false, error: { code: "upload_auth" } })),
   ).toThrow("rm2 cloud login");
+});
+
+describe("resume a preview after reopening the command", () => {
+  it("recovers the frozen destination and PDF without exporting or uploading again", async () => {
+    const exported = await service.export(snapshot(), folder);
+    runner.mockClear();
+    renderer.mockClear();
+    const reopened = new DailyPlanService(service.root, prefs, renderer, runner);
+    const [saved, concurrent] = await Promise.all([reopened.latest(), reopened.latest()]);
+    expect(concurrent).toEqual(saved);
+    expect(shouldResumePreview(saved, new Date(exported.createdAt))).toBe(true);
+    expect(saved).toEqual(exported);
+    expect(saved?.folder.id).toBe(folder.id);
+    expect(renderer).not.toHaveBeenCalled();
+    expect(runner).not.toHaveBeenCalled();
+    expect((await reopened.send(saved!.id)).documentId).toBe(documentId);
+    expect(runner.mock.calls.filter(([, args]) => args[1] === "upload")).toHaveLength(1);
+  });
+
+  it("does not offer yesterday's preview after Oslo midnight", async () => {
+    const exported = await service.export(snapshot(), folder);
+    exported.snapshot.day = "2026-10-06";
+    expect(shouldResumePreview(exported, new Date("2026-10-06T21:59:59Z"))).toBe(true);
+    expect(shouldResumePreview(exported, new Date("2026-10-06T22:00:00Z"))).toBe(false);
+    expect(shouldResumePreview(undefined)).toBe(false);
+  });
+
+  it.each(["sent", "sending", "uncertain", "error", "exporting", "validating"] as const)(
+    "does not resume a %s job as an unsent preview",
+    async (state) => {
+      const exported = await service.export(snapshot(), folder);
+      expect(shouldResumePreview({ ...exported, state }, new Date(exported.createdAt))).toBe(false);
+    },
+  );
 });

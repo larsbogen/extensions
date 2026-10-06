@@ -108,8 +108,11 @@ Todoist-data leses på nytt både når kommandoen åpnes og når forhåndsvisnin
    ikke utvalget. Handlingsmenyen har også **Velg alle** og **Fjern alle valg**.
 3. **Lag forhåndsvisning** (`⌘↵`) fryser utvalget, lager PDF og kontrollerer hver
    side. PDF-en åpnes i standard PDF-leser.
-4. Kontroller oppgaver, sideantall og målmappe, og bruk deretter **Send til
-   reMarkable**. Bekreftet sending viser dokumentnavn og dokument-ID.
+4. Gå tilbake til Raycast etter PDF-forhåndsvisningen. Kontroller oppgaver,
+   sideantall og målmappe, og trykk **Enter** for **Send til reMarkable**.
+   Forhåndsvisning alene laster ikke opp filen. Bekreftet sending viser
+   dokumentnavn og dokument-ID. Åpner du kommandoen på nytt, vises dagens siste
+   usendte forhåndsvisning automatisk, klar for eksplisitt sending.
 
 PDFKit genererer dokumentet direkte i utvidelsen, uten Marked, AppleScript eller
 Python som PDF-motor. Sidene har reMarkable-skjermens 3:4-format (447 × 596 pt), så

@@ -3,7 +3,7 @@ import { access, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } f
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { PlanSnapshot } from "./plan";
+import { osloDay, type PlanSnapshot } from "./plan";
 import { PAGE_SIZE, type PdfRenderer } from "./pdf";
 import { planMarkdown } from "./markdown";
 import { runProcess, type Runner } from "./process";
@@ -27,6 +27,11 @@ export type ExportJob = {
   documentId?: string;
   error?: string;
 };
+// Restore only today's unsent snapshot; never retry a sent or ambiguous upload.
+export function shouldResumePreview(job: ExportJob | undefined, now = new Date()): job is ExportJob {
+  return !!job && job.state === "ready" && job.pages > 0 && job.snapshot.day === osloDay(now);
+}
+
 type Tools = { rm2: string; pdfinfo: string; pdftoppm: string };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
@@ -118,6 +123,7 @@ export function validatePdfInfo(output: string, expectedPages?: number): number 
 }
 
 export class DailyPlanService {
+  private latestRead?: Promise<ExportJob | undefined>;
   constructor(
     readonly root: string,
     readonly prefs: ToolPreferences,
@@ -430,8 +436,11 @@ export class DailyPlanService {
       return job;
     });
   }
-  async latest(): Promise<ExportJob | undefined> {
-    return this.locked(async () => {
+  latest(): Promise<ExportJob | undefined> {
+    // React can run initialization twice. Share that read instead of treating
+    // the second initialization as a competing export job.
+    if (this.latestRead) return this.latestRead;
+    this.latestRead = this.locked(async () => {
       const jobs: ExportJob[] = [];
       for (const entry of await readdir(this.root)) {
         if (!UUID.test(entry)) continue;
@@ -443,6 +452,9 @@ export class DailyPlanService {
         }
       }
       return jobs.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    }).finally(() => {
+      this.latestRead = undefined;
     });
+    return this.latestRead;
   }
 }

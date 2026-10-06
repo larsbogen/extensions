@@ -25,6 +25,7 @@ import { createPlanPdf } from "./remarkable/pdf";
 import { createSnapshot, dailyTasks, type PlanTask } from "./remarkable/plan";
 import {
   DailyPlanService,
+  shouldResumePreview,
   type ExportJob,
   type Folder,
   type JobState,
@@ -35,7 +36,7 @@ const FOLDER_KEY = "remarkable-daily-plan-folder-v1";
 const STATE_LABELS: Record<JobState, string> = {
   exporting: "Lager PDF …",
   validating: "Validerer alle PDF-sider …",
-  ready: "Forhåndsvisning klar",
+  ready: "Klar til sending – ikke sendt ennå",
   sending: "Sender til reMarkable …",
   sent: "Sendt til reMarkable Cloud",
   uncertain: "Sending ikke bekreftet",
@@ -197,7 +198,6 @@ export function DailyPlanCommand() {
   const [stage, setStage] = useState<JobState>();
   const [job, setJob] = useState<ExportJob>();
   const [latest, setLatest] = useState<ExportJob>();
-  const [previewOpened, setPreviewOpened] = useState(false);
   const [search, setSearch] = useState("");
   const busy = useRef(false);
 
@@ -214,7 +214,6 @@ export function DailyPlanCommand() {
     setTasks([]);
     setSelected(new Set());
     setJob(undefined);
-    setPreviewOpened(false);
     try {
       const fresh = await fetchFresh();
       setTasks(fresh);
@@ -226,7 +225,13 @@ export function DailyPlanCommand() {
     }
   }, [fetchFresh]);
   useEffect(() => {
-    void reload();
+    let cancelled = false;
+    void (async () => {
+      const [, saved] = await Promise.all([reload(), service.latest().catch(() => undefined)]);
+      if (cancelled) return;
+      setLatest(saved);
+      if (shouldResumePreview(saved)) setJob(saved);
+    })();
     void LocalStorage.getItem<string>(FOLDER_KEY).then((raw) => {
       if (raw) {
         try {
@@ -237,22 +242,19 @@ export function DailyPlanCommand() {
         }
       }
     });
-    void service
-      .latest()
-      .then(setLatest)
-      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [reload, service]);
   const chooseFolder = async (value: Folder) => {
     await LocalStorage.setItem(FOLDER_KEY, JSON.stringify(value));
     setFolder(value);
     setJob(undefined);
-    setPreviewOpened(false);
   };
   const changeSelection = (value: Set<string>) => {
     if (!busy.current) {
       setSelected(value);
       setJob(undefined);
-      setPreviewOpened(false);
     }
   };
   const toggle = (id: string) => {
@@ -264,9 +266,14 @@ export function DailyPlanCommand() {
   async function openPreview(value: ExportJob) {
     try {
       await open(service.pdfPath(value));
-      setPreviewOpened(true);
+      if (value.state === "ready") {
+        await showToast({
+          style: Toast.Style.Success,
+          title: "PDF klar – ikke sendt ennå",
+          message: "Gå tilbake til Raycast og trykk Enter for å sende til reMarkable.",
+        });
+      }
     } catch {
-      setPreviewOpened(false);
       await showToast({
         style: Toast.Style.Failure,
         title: "Kunne ikke åpne PDF",
@@ -299,7 +306,7 @@ export function DailyPlanCommand() {
     }
   }
   async function send() {
-    if (busy.current || !job || !previewOpened || job.state !== "ready") return;
+    if (busy.current || !job || job.state !== "ready") return;
     busy.current = true;
     setStage("sending");
     try {
@@ -338,6 +345,15 @@ export function DailyPlanCommand() {
       `**${job.snapshot.tasks.length} oppgaver · ${job.pages} sider**`,
       "",
       `Mappe: ${job.folder.name}`,
+      ...(job.state === "ready"
+        ? [
+            "",
+            "**PDF-en er laget, men er ikke sendt til reMarkable.**",
+            "",
+            "Trykk **Enter** her i Raycast for å sende denne PDF-en til målmappen. " +
+              "Du kan åpne forhåndsvisningen igjen fra handlingsmenyen (⌘K).",
+          ]
+        : []),
       "",
       "PDF-en er et frosset øyeblikksbilde. Avkrysninger og notater synkroniseres ikke til Todoist.",
       ...(job.documentId ? ["", `Dokument-ID: \`${job.documentId}\``] : []),
@@ -357,9 +373,7 @@ export function DailyPlanCommand() {
         actions={
           active ? undefined : (
             <ActionPanel>
-              {job.state === "ready" && previewOpened ? (
-                <Action title="Send Til reMarkable" icon={Icon.Upload} onAction={send} />
-              ) : null}
+              {job.state === "ready" ? <Action title="Send Til reMarkable" icon={Icon.Upload} onAction={send} /> : null}
               <Action title="Åpne Forhåndsvisning" icon={Icon.Document} onAction={() => openPreview(job)} />
               <Action
                 title="Tilbake Til Oppgavevalg"
@@ -367,7 +381,6 @@ export function DailyPlanCommand() {
                 onAction={() => {
                   setJob(undefined);
                   setStage(undefined);
-                  setPreviewOpened(false);
                 }}
               />
               <Action.ShowInFinder title="Vis Eksportfiler" path={service.pdfPath(job)} />
@@ -403,8 +416,6 @@ export function DailyPlanCommand() {
           onAction={async () => {
             setJob(latest);
             setStage(latest.state);
-            setPreviewOpened(false);
-            await openPreview(latest);
           }}
         />
       ) : null}
