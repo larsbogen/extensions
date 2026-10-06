@@ -1,5 +1,16 @@
 # Todoist Changelog
 
+## Complete tasks from the focus window - {PR_MERGE_DATE}
+
+- Add “Fullfør oppgave” to complete the focused Todoist task, clear its focus, and close the timer.
+- Pause while completing, show failures in the card, and reuse a completion ID to protect recurring tasks on retries.
+
+## [Floating Focus Card] - 2026-10-06
+
+- Add a separate macOS focus card with adjustable text size and width, a persistent timer, pause/resume, and task links.
+- Preserve full focused-task titles and shorten them only when rendering the menu bar.
+- Add the Show Focus Window command and local native build/session tests.
+
 ## [Quick date choices when scheduling tasks] - {PR_MERGE_DATE}
 
 - Add Today, Tomorrow, Later This Week, This Weekend, Next Week and No Date to Schedule Task, with the target dates displayed in the menu.

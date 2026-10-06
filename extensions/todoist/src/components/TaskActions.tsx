@@ -289,9 +289,9 @@ export default function TaskActions({
             title="Focus Task"
             icon={Icon.Center}
             shortcut={{ modifiers: ["cmd"], key: "f" }}
-            onAction={() => {
-              focusTask(task);
-              refreshMenuBarCommand();
+            onAction={async () => {
+              await focusTask(task);
+              await refreshMenuBarCommand();
             }}
           />
         ) : (
@@ -299,9 +299,13 @@ export default function TaskActions({
             title="Unfocus Task"
             icon={Icon.MinusCircle}
             shortcut={{ modifiers: ["cmd"], key: "f" }}
-            onAction={() => {
-              unfocusTask();
-              refreshMenuBarCommand();
+            onAction={async () => {
+              try {
+                await unfocusTask();
+                await refreshMenuBarCommand();
+              } catch (error) {
+                await showFailureToast(error, { title: "Unable to unfocus task" });
+              }
             }}
           />
         )}

@@ -57,6 +57,53 @@ Tests use simulated API responses and do not access a Todoist account.
 To load the fork locally in Raycast, run `npm run dev`. Authenticate in Raycast when prompted.
 The distribution build is written to `dist/`; building and testing do not install the fork or change the Store version.
 
+### Flytende fokuskort (macOS)
+
+**Focus Task** (`⌘F` på en Todoist-oppgave) åpner nå et eget, flyttbart macOS-kort.
+Kortet viser oppgavetittelen med tekstbryting og en timer. Det har sin egen størrelse;
+Raycasts generelle utseende blir ikke endret.
+
+- Velg **Tekst: 20 / 26 / 34 / 42** og **Bredde: 420 / 480 / 640 / 800** direkte i kortet.
+  Dra i tittelen eller bruk **Flytt**-menyen for å flytte vinduet, og bruk håndtaket nederst til høyre for fri størrelse.
+  Plassering, bredde og tekststørrelse huskes. Svært lange titler kan rulles inne i kortet.
+- En ny økt starter med 25 minutter. Velg 15, 25, 50 minutter eller uten tidsgrense i kortet,
+  eller endre standarden i utvidelsens **Focus Session Length**-innstilling.
+  Endring av varighet bevarer tiden du allerede har jobbet.
+- **Pause / Fortsett** styrer aktiv tid, og **+5 min** forlenger økten.
+  Når tiden er ute, blir kortet stående med valget om ny økt eller forlengelse.
+- **Åpne oppgave** åpner oppgaven i Todoist. **Avslutt økt** lukker kortet og stopper timeren.
+  Ingen av delene fullfører oppgaven i Todoist.
+- **Fullfør oppgave** fullfører oppgaven i Todoist, fjerner fokuset og lukker kortet.
+  Timeren står på pause mens fullføringen pågår. Ved feil kan du prøve igjen eller fortsette økten.
+  For gjentakende oppgaver fullføres den aktuelle forekomsten, og fokusetiketten fjernes fra den neste.
+- Lukkekrysset setter økten på pause. Bruk **Show Focus Window** i Raycast for å hente den
+  frem igjen. Samme oppgave beholder timeren; en annen oppgave starter en ny økt.
+  **Unfocus Task** stopper også kortet. Etter maskinhvile, skjermlås eller omstart må en
+  påbegynt økt fortsettes manuelt. Ved et uventet prosesskrasj kan inntil fem sekunder
+  siden siste lagring gå tapt.
+
+Kortet er en liten AppKit-hjelpeapp som bare kjører når en fokusøkt vises. Den får tittel,
+oppgave-ID og oppgavelenke gjennom lokale JSON-filer under utvidelsens supportmappe
+(`focus-panel/`). Den får ingen Todoist-token og gjør ingen nettverkskall.
+App- og nettstedblokkering og Toggl-integrasjon er ikke del av denne versjonen.
+Windows beholder den eksisterende menylinjefunksjonen.
+
+Bygging krever eksisterende Xcode Command Line Tools på macOS. `npm run build` og
+`npm run dev` bygger hjelpeappen først. Ved endring i Swift-koden mens den lokale
+utviklingstjenesten kjører, bruk `npm run build:focus`, lukk fokuskortet og åpne det igjen.
+Hjelpeappen bygges for arkitekturen til maskinen du bruker; et distribuert bygg for
+andre Mac-arkitekturer må bygges der eller gjøres universelt før publisering.
+
+```sh
+npm run build:focus  # AppKit-hjelpeapp, lokalt signert, ingen nedlasting
+npm run test:focus   # Timer, pauser, gjenoppretting og lagring
+npm test            # Inkluderer JSON-broen og bekreftelse av oppstart
+```
+
+Genererte moduler og testprogram ligger i `work/focus-panel-build/` og kan slettes
+etter bygging. Kjørbar app i `assets/focus-panel/` må beholdes for lokal bruk og inngår
+i Raycast-bygg. Den er generert og ikke sjekket inn.
+
 ### Automatisk lokal oppdatering på macOS
 
 Kjør dette fra `extensions/todoist` for å installere en LaunchAgent for din bruker:

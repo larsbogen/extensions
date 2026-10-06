@@ -50,6 +50,7 @@ function install() {
     ["/opt/homebrew/bin/node", "/usr/local/bin/node"].find(
       (candidate) => existsSync(candidate) && realpathSync(candidate) === realpathSync(process.execPath),
     ) ?? process.execPath;
+  execFileSync(node, [join(project, "scripts", "build-focus-panel.mjs")], { stdio: "inherit" });
   const path = [
     ...new Set([dirname(node), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]),
   ].join(delimiter);

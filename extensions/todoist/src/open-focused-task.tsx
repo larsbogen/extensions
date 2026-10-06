@@ -7,7 +7,7 @@ const command = async () => {
   const focusedTask = cachedTaskData ? JSON.parse(cachedTaskData) : undefined;
 
   try {
-    if (focusedTask) {
+    if (focusedTask?.id) {
       await launchCommand({
         name: "home",
         type: LaunchType.UserInitiated,

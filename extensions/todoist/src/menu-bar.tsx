@@ -92,7 +92,7 @@ function MenuBar() {
 
   const menuBarExtraTitle = useMemo(() => {
     if (focusedTask.id) {
-      return removeMarkdown(focusedTask.content);
+      return truncateMiddle(removeMarkdown(focusedTask.content), parseInt(taskWidth ?? "40"));
     }
 
     if (showNextTask) {

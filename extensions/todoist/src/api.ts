@@ -428,14 +428,14 @@ export async function updateTasks(argsList: UpdateTaskArgs[], { setData }: Cache
 }
 
 /** Complete task; merges returned items + reminders so recurring tasks show the next due in cache. */
-export async function closeTask(id: string, { setData }: CachedDataParams) {
+export async function closeTask(id: string, { setData }: CachedDataParams, commandId: string = crypto.randomUUID()) {
   const updatedData = await syncRequest({
     sync_token,
     resource_types: ["items", "reminders"],
     commands: [
       {
         type: "item_close",
-        uuid: crypto.randomUUID(),
+        uuid: commandId,
         args: { id },
       },
     ],

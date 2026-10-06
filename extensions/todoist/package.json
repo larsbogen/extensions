@@ -286,6 +286,21 @@
       "disabledByDefault": true
     },
     {
+      "name": "show-focus-window",
+      "title": "Show Focus Window",
+      "subtitle": "Todoist",
+      "description": "Vis et flyttbart fokusvindu med stor oppgavetittel, timer og pause. Krever macOS.",
+      "mode": "no-view"
+    },
+    {
+      "name": "complete-focused-task",
+      "title": "Complete Focused Task",
+      "subtitle": "Todoist",
+      "description": "Fullfør oppgaven fra fokusvinduet og stopp fokusøkten.",
+      "mode": "no-view",
+      "disabledByDefault": true
+    },
+    {
       "name": "send-daily-plan",
       "title": "Send dagsplan til reMarkable",
       "subtitle": "Todoist",
@@ -693,6 +708,41 @@
       "placeholder": "raycast-focus"
     },
     {
+      "name": "showFocusWindow",
+      "type": "checkbox",
+      "required": false,
+      "default": true,
+      "label": "Open floating focus window",
+      "title": "Focus Window",
+      "description": "Show a separate, resizable focus card when choosing Focus Task on macOS. Its text size is independent of Raycast."
+    },
+    {
+      "name": "focusDuration",
+      "type": "dropdown",
+      "required": false,
+      "default": "25",
+      "title": "Focus Session Length",
+      "description": "Default duration of a new focus session. You can adjust this in the floating card.",
+      "data": [
+        {
+          "title": "15 minutes",
+          "value": "15"
+        },
+        {
+          "title": "25 minutes",
+          "value": "25"
+        },
+        {
+          "title": "50 minutes",
+          "value": "50"
+        },
+        {
+          "title": "No time limit",
+          "value": "0"
+        }
+      ]
+    },
+    {
       "name": "useConfetti",
       "type": "checkbox",
       "label": "Use confetti to celebrate task completion",
@@ -728,6 +778,10 @@
     "vitest": "^5.0.1"
   },
   "scripts": {
+    "build:focus": "node scripts/build-focus-panel.mjs",
+    "test:focus": "node scripts/build-focus-panel.mjs --test",
+    "prebuild": "npm run build:focus",
+    "predev": "npm run build:focus",
     "build": "ray build -e dist --output ./dist",
     "dev": "ray develop",
     "local:install": "node scripts/local-agent.mjs install",
