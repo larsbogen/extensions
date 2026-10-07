@@ -2,16 +2,17 @@ import { environment } from "@raycast/api";
 import { createDeeplink } from "@raycast/utils";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import removeMarkdown from "remove-markdown";
 
-type FocusTask = { id: string; content: string };
+type FocusTask = { id: string; content: string; projectId?: string };
 type PanelRequest = {
   id: string;
-  action: "start" | "stop";
-  task?: { id: string; title: string; url: string; completionURL?: string };
+  action: "start" | "stop" | "show";
+  task?: { id: string; title: string; url: string; completionURL?: string; projectId?: string };
   taskId?: string;
+  sessionId?: string;
   duration?: number;
 };
 
@@ -44,16 +45,24 @@ export function createFocusPanelClient(options: {
         throw new Error("Fokusvinduet er ikke bygget. Kjør npm run build:focus i Todoist-prosjektet.");
       }
       await mkdir(options.directory, { recursive: true, mode: 0o700 });
-      const temporary = join(options.directory, `${request.id}.tmp`);
+      // A separate file per command prevents concurrent Raycast processes from
+      // overwriting one another's requests. The helper consumes them in order.
+      const inbox = join(options.directory, "requests");
+      await mkdir(inbox, { recursive: true, mode: 0o700 });
+      const temporary = join(inbox, `${request.id}.tmp`);
+      const queued = join(inbox, `${Date.now()}-${request.id}.json`);
       await writeFile(temporary, JSON.stringify(request), { mode: 0o600 });
-      await rename(temporary, join(options.directory, "request.json"));
+      await rename(temporary, queued);
       await (options.launch ?? launch)(options.executable, options.directory);
       const deadline = Date.now() + (options.timeoutMs ?? 6000);
       let lastLaunch = Date.now();
       while (Date.now() < deadline) {
         try {
           const state = JSON.parse(await readFile(join(options.directory, "state.json"), "utf8"));
-          if (state.requestId === request.id) return;
+          if (state.requestId === request.id || state.acknowledgedRequests?.includes(request.id)) {
+            await rm(queued, { force: true });
+            return;
+          }
           // Completing a task can unfocus it from both the task view and the
           // menu bar. Either stop acknowledgement is sufficient for that task.
           if (
@@ -94,18 +103,38 @@ export function createFocusPanelClient(options: {
           title: removeMarkdown(task.content),
           url: `https://todoist.com/app/task/${encodeURIComponent(task.id)}`,
           completionURL: createDeeplink({ command: "complete-focused-task" }),
+          projectId: task.projectId,
         },
         duration: minutes * 60,
       });
     },
+    async showPending() {
+      let state;
+      try {
+        state = JSON.parse(await readFile(join(options.directory, "state.json"), "utf8"));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+        throw error;
+      }
+      const pending = state.tracking?.periods?.some(
+        (period: { sync: string; recoveryDetectedAt?: number }) =>
+          !["local", "synced", "accepted"].includes(period.sync) || period.recoveryDetectedAt != null,
+      );
+      if (!state.session || (!pending && !state.tracking?.takeover)) return false;
+      await send({ id: randomUUID(), action: "show" });
+      return true;
+    },
     async stop(taskId?: string) {
       // No session file means the helper has never run; unfocusing still works.
+      let sessionId: string | undefined;
       try {
-        await access(join(options.directory, "state.json"));
-      } catch {
-        return;
+        const state = JSON.parse(await readFile(join(options.directory, "state.json"), "utf8"));
+        sessionId = state.session?.id;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
       }
-      await send({ id: randomUUID(), action: "stop", taskId });
+      await send({ id: randomUUID(), action: "stop", taskId, sessionId });
     },
   };
 }
@@ -122,4 +151,8 @@ export async function showFocusPanel(task: FocusTask, minutes = 25) {
 
 export async function stopFocusPanel(taskId?: string) {
   if (process.platform === "darwin") await client.stop(taskId);
+}
+
+export async function showPendingFocusPanel() {
+  return process.platform === "darwin" ? client.showPending() : false;
 }

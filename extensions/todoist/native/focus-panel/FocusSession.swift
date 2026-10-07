@@ -5,6 +5,7 @@ struct FocusTask: Codable {
     var title: String
     var url: String
     var completionURL: String?
+    var projectId: String?
 }
 
 struct FocusCompletionResult: Codable {
@@ -19,6 +20,7 @@ struct FocusRequest: Codable {
     var task: FocusTask?
     var duration: Double?
     var taskId: String?
+    var sessionId: String?
 }
 
 enum FocusPhase: String, Codable {
@@ -33,6 +35,7 @@ struct FocusSession: Codable {
     var duration: Double
     var elapsed: Double = 0
     var phase: FocusPhase = .running
+    var togglEnabled: Bool?
 
     init(task: FocusTask, duration: Double) {
         self.task = task
@@ -105,9 +108,33 @@ struct FocusAppearance: Codable {
 }
 
 struct FocusSnapshot: Codable {
-    var version = 1
+    var version = 2
     var session: FocusSession?
     var appearance = FocusAppearance()
     var requestId = ""
     var updatedAt = Date().timeIntervalSince1970
+    var tracking = TrackingState()
+    var acknowledgedRequests: [String] = []
+
+    init(session: FocusSession? = nil, appearance: FocusAppearance = FocusAppearance()) {
+        self.session = session
+        self.appearance = appearance
+    }
+
+    enum CodingKeys: String, CodingKey { case version, session, appearance, requestId, updatedAt, tracking, acknowledgedRequests }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let version = try values.decode(Int.self, forKey: .version)
+        guard version == 1 || version == 2 else {
+            throw DecodingError.dataCorruptedError(forKey: .version, in: values, debugDescription: "Ukjent fokusversjon")
+        }
+        session = try values.decodeIfPresent(FocusSession.self, forKey: .session)
+        appearance = try values.decodeIfPresent(FocusAppearance.self, forKey: .appearance) ?? FocusAppearance()
+        requestId = try values.decodeIfPresent(String.self, forKey: .requestId) ?? ""
+        updatedAt = try values.decodeIfPresent(Double.self, forKey: .updatedAt) ?? 0
+        tracking = try values.decodeIfPresent(TrackingState.self, forKey: .tracking) ?? TrackingState()
+        acknowledgedRequests = try values.decodeIfPresent([String].self, forKey: .acknowledgedRequests) ?? []
+        // v1 elapsed time has no reliable wall-clock history and is never uploaded.
+        self.version = 2
+    }
 }

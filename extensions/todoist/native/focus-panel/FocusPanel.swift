@@ -54,7 +54,24 @@ final class ProgressTrack: NSView {
 final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let directory: URL
     let lockDescriptor: Int32
-    var snapshot = FocusSnapshot()
+    var coordinator: FocusCoordinator!
+    var snapshot: FocusSnapshot {
+        get { coordinator.snapshot }
+        set { coordinator.snapshot = newValue }
+    }
+    var settingsWindow: TogglSettingsWindow?
+    var isHiddenForSync = false
+    var isProcessingRequests = false
+    let togglToggle = NSButton(checkboxWithTitle: "Registrer i Toggl", target: nil, action: nil)
+    let togglProject = NSPopUpButton()
+    let togglStatus = NSTextField(wrappingLabelWithString: "")
+    let activeTimeLabel = NSTextField(labelWithString: "")
+    let togglSettings = NSButton(title: "Koble til Toggl", target: nil, action: nil)
+    let togglReview = NSButton(title: "Se gjennom", target: nil, action: nil)
+    let togglSync = NSButton(title: "Synkroniser", target: nil, action: nil)
+    var togglControls: NSStackView!
+    var fixedContentHeight: CGFloat { max(314, contentStack.fittingSize.height - titleAreaHeight.constant + 62) }
+
     var panel: FocusPanel!
     var ticker: Timer?
     var previousTick = ProcessInfo.processInfo.systemUptime
@@ -92,22 +109,37 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if let data = try? Data(contentsOf: directory.appendingPathComponent("state.json")),
-           let saved = try? JSONDecoder().decode(FocusSnapshot.self, from: data), saved.version == 1 {
-            snapshot = saved
-            snapshot.session?.restore()
+        let store = FocusStore(directory: directory)
+        do {
+            let saved = try store.load() ?? FocusSnapshot()
+            coordinator = FocusCoordinator(snapshot: saved, write: store.save)
+            coordinator.restore()
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Kunne ikke lese fokusdata"
+            alert.informativeText = "Den lagrede filen er bevart. Kontroller state.json i fokusmappen før du prøver igjen."
+            alert.runModal()
+            NSApp.terminate(nil)
+            return
         }
         buildPanel()
+        coordinator.onChange = { [weak self] in
+            guard let self = self else { return }
+            self.render()
+            self.finishBackgroundIfPossible()
+        }
         consumeRequest()
         if snapshot.session == nil {
             NSApp.terminate(nil)
             return
         }
         render()
-        panel.orderFrontRegardless()
+        if !isHiddenForSync { panel.orderFrontRegardless() }
         save()
-        ticker = Timer.scheduledTimer(timeInterval: 0.5, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
+        coordinator.requestSync()
+        ticker = Timer(timeInterval: 0.5, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
         ticker?.tolerance = 0.1
+        RunLoop.main.add(ticker!, forMode: .common)
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.addObserver(self, selector: #selector(suspend), name: NSWorkspace.willSleepNotification, object: nil)
         workspace.addObserver(self, selector: #selector(wake), name: NSWorkspace.didWakeNotification, object: nil)
@@ -201,6 +233,13 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         button(openButton, #selector(openTask))
         button(endButton, #selector(endSession))
         button(completeButton, #selector(completeTask))
+        pauseButton.keyEquivalent = "p"
+        pauseButton.keyEquivalentModifierMask = [.command]
+        pauseButton.toolTip = "Pause eller fortsett (⌘P)"
+        extendButton.keyEquivalent = "+"
+        extendButton.keyEquivalentModifierMask = [.command]
+        completeButton.keyEquivalent = "\r"
+        completeButton.keyEquivalentModifierMask = [.command]
         completeButton.contentTintColor = .systemGreen
         completeButton.toolTip = "Fullfør oppgaven i Todoist og stopp fokuset"
         let actions = row([pauseButton, openButton, spacer(), endButton])
@@ -229,7 +268,26 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         positionPicker.action = #selector(movePanel)
         positionPicker.setAccessibilityLabel("Flytt fokusvinduet")
         let header = row([statusLabel, spacer(), positionPicker])
-        contentStack = NSStackView(views: [header, titleScroll, timeRow, progress, completionRow, actions, hintLabel, options])
+        button(togglSettings, #selector(openTogglSettings))
+        button(togglReview, #selector(reviewToggl))
+        button(togglSync, #selector(syncToggl))
+        for control in [togglSettings, togglReview, togglSync] {
+            control.font = .systemFont(ofSize: 12, weight: .medium)
+        }
+        togglToggle.target = self
+        togglToggle.action = #selector(toggleToggl)
+        togglToggle.setAccessibilityLabel("Registrer arbeidstid i Toggl")
+        togglProject.target = self
+        togglProject.action = #selector(changeTogglProject)
+        togglProject.setAccessibilityLabel("Toggl-prosjekt")
+        togglProject.widthAnchor.constraint(lessThanOrEqualToConstant: 200).isActive = true
+        togglControls = row([togglToggle, spacer(), togglProject])
+        togglStatus.font = .systemFont(ofSize: 12)
+        togglStatus.textColor = .secondaryLabelColor
+        togglStatus.setContentCompressionResistancePriority(.required, for: .vertical)
+        activeTimeLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        let togglActions = row([togglSettings, togglReview, spacer(), togglSync])
+        contentStack = NSStackView(views: [header, titleScroll, timeRow, activeTimeLabel, progress, completionRow, actions, hintLabel, togglControls, togglStatus, togglActions, options])
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
         contentStack.spacing = 14
@@ -241,7 +299,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             contentStack.trailingAnchor.constraint(equalTo: backdrop.trailingAnchor, constant: -24),
             contentStack.bottomAnchor.constraint(lessThanOrEqualTo: backdrop.bottomAnchor, constant: -20),
         ])
-        for view in [header, titleScroll, timeRow, progress, completionRow, actions, hintLabel, options] {
+        for view in [header, titleScroll, timeRow, activeTimeLabel, progress, completionRow, actions, hintLabel, togglControls!, togglStatus, togglActions, options] {
             view.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
         }
         if let x = appearance.x, let y = appearance.y {
@@ -301,7 +359,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         pauseButton.setAccessibilityLabel(pauseButton.title)
         completeButton.title = isCompleting ? "Fullfører …" : "Fullfør oppgave"
         completeButton.setAccessibilityLabel(completeButton.title)
-        completeButton.isEnabled = !isCompleting && session.task.completionURL != nil
+        completeButton.isEnabled = !isCompleting && session.phase != .ended && session.task.completionURL != nil
         for control in [pauseButton, extendButton, endButton, durationPicker] { control.isEnabled = !isCompleting }
         if isCompleting {
             hintLabel.stringValue = "Fullfører oppgaven i Todoist. Timeren er satt på pause."
@@ -328,6 +386,42 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             durationPicker.item(at: 4)?.title = "\(Int(session.duration / 60)) min"
             durationPicker.selectItem(at: 4)
         }
+        let connected = snapshot.tracking.settings.accountID != nil
+        togglSettings.title = connected ? "Toggl-innstillinger" : "Koble til Toggl"
+        togglSettings.setAccessibilityLabel(togglSettings.title)
+        togglControls.isHidden = !connected
+        togglStatus.isHidden = !connected && snapshot.tracking.periods.allSatisfy { $0.accountID == nil }
+        togglStatus.stringValue = coordinator.status
+        togglStatus.setAccessibilityLabel(coordinator.status)
+        togglToggle.state = coordinator.trackingEnabled ? .on : .off
+        togglToggle.isEnabled = !isCompleting
+        togglProject.isEnabled = !isCompleting
+        togglSync.isHidden = !connected
+        togglSync.isEnabled = !coordinator.busy
+        togglReview.isEnabled = !coordinator.busy
+        togglReview.isHidden = coordinator.reviewPeriods.isEmpty && snapshot.tracking.takeover?.issue == nil
+        let projects = snapshot.tracking.settings.availableProjects
+        let titles = ["Uten prosjekt"] + projects.map(\.name)
+        if togglProject.itemTitles != titles { togglProject.removeAllItems(); togglProject.addItems(withTitles: titles) }
+        let selected = snapshot.tracking.settings.project(for: session.task)
+        if let selected = selected, let index = projects.firstIndex(where: { $0.id == selected }) {
+            togglProject.selectItem(at: index + 1)
+        } else if selected != nil {
+            togglProject.addItem(withTitle: "Prosjekt utilgjengelig")
+            togglProject.selectItem(at: togglProject.numberOfItems - 1)
+        } else { togglProject.selectItem(at: 0) }
+        let seconds = max(0, Int(session.elapsed))
+        activeTimeLabel.stringValue = String(format: "Arbeidstid i økten: %d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
+        activeTimeLabel.setAccessibilityLabel(activeTimeLabel.stringValue)
+        let minimum = fixedContentHeight + 64
+        panel.minSize = NSSize(width: 420, height: min(800, minimum))
+        if panel.frame.height < panel.minSize.height {
+            var frame = panel.frame
+            frame.origin.y -= panel.minSize.height - frame.height
+            frame.size.height = panel.minSize.height
+            panel.setFrame(frame, display: true)
+            constrainToScreen()
+        }
         layoutTitle()
     }
 
@@ -344,7 +438,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         titleWidth.constant = width
         titleHeight.constant = max(font.pointSize + 8, height)
         // Grow to show normal titles in full; unusually long titles remain scrollable.
-        let available = max(64, panel.frame.height - 314)
+        let available = max(64, panel.frame.height - fixedContentHeight)
         titleAreaHeight.constant = min(max(64, height), available)
         titleScroll.documentView?.setFrameSize(NSSize(width: width, height: max(height, titleAreaHeight.constant)))
         if lastTitleWidth != width {
@@ -359,7 +453,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let height = ceil((titleLabel.stringValue as NSString).boundingRect(
             with: NSSize(width: width, height: 10000), options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: font]).height) + 8
         let limit = min(800, (panel.screen ?? NSScreen.main)?.visibleFrame.height ?? 800)
-        let needed = min(limit, max(390, height + 320))
+        let needed = min(limit, max(panel.minSize.height, height + fixedContentHeight))
         if needed > panel.frame.height || fit {
             var frame = panel.frame
             frame.origin.y -= needed - frame.height
@@ -371,14 +465,12 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func updateElapsed() {
-        let now = ProcessInfo.processInfo.systemUptime
         let oldPhase = snapshot.session?.phase
-        snapshot.session?.advance(by: max(0, now - previousTick))
-        previousTick = now
+        coordinator.advance()
+        if oldPhase == .running && snapshot.session?.phase != .running { coordinator.requestSync() }
         if oldPhase == .running && snapshot.session?.phase == .finished {
             NSSound(named: "Glass")?.play()
-            panel.orderFrontRegardless()
-            save()
+            if !isHiddenForSync { panel.orderFrontRegardless() }
         }
     }
 
@@ -387,65 +479,78 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         consumeRequest()
         consumeCompletion()
         render()
-        if ProcessInfo.processInfo.systemUptime - lastSave >= 5 { save() }
+        if snapshot.session?.phase == .running && ProcessInfo.processInfo.systemUptime - lastSave >= 5 { save() }
+        coordinator.retryIfDue()
+        finishBackgroundIfPossible()
     }
 
     func consumeRequest() {
-        guard let data = try? Data(contentsOf: directory.appendingPathComponent("request.json")), data != requestData,
-              let request = try? JSONDecoder().decode(FocusRequest.self, from: data) else { return }
-        requestData = data
-        guard request.id != snapshot.requestId else { return }
+        isProcessingRequests = true
+        defer { isProcessingRequests = false; finishBackgroundIfPossible() }
+        let inbox = directory.appendingPathComponent("requests")
+        let queued = ((try? FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        for file in queued {
+            guard let data = try? Data(contentsOf: file), let request = try? JSONDecoder().decode(FocusRequest.self, from: data) else { continue }
+            if handleRequest(request) { try? FileManager.default.removeItem(at: file) }
+        }
+        // Read the previous single-file protocol for older clients and local previews.
+        if let data = try? Data(contentsOf: directory.appendingPathComponent("request.json")), data != requestData,
+           let request = try? JSONDecoder().decode(FocusRequest.self, from: data), handleRequest(request) {
+            requestData = data
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent("request.json"))
+        }
+    }
+
+    func acknowledge(_ request: FocusRequest) -> Bool {
+        let previousID = snapshot.requestId
+        let previousAcknowledgements = snapshot.acknowledgedRequests
+        snapshot.requestId = request.id
+        snapshot.acknowledgedRequests.append(request.id)
+        snapshot.acknowledgedRequests = Array(snapshot.acknowledgedRequests.suffix(256))
+        if coordinator.persist() { return true }
+        snapshot.requestId = previousID
+        snapshot.acknowledgedRequests = previousAcknowledgements
+        return false
+    }
+
+    func handleRequest(_ request: FocusRequest) -> Bool {
+        if request.id == snapshot.requestId || snapshot.acknowledgedRequests.contains(request.id) { return true }
         if request.action == "start", let task = request.task, !task.id.isEmpty, !task.title.isEmpty {
-            if snapshot.session?.task.id == task.id && snapshot.session?.phase != .ended {
-                // Showing the same task must not reset or resume its timer.
-                snapshot.session?.task = task
-            } else {
-                snapshot.session = FocusSession(task: task, duration: request.duration ?? 1500)
+            isHiddenForSync = false
+            let previousID = snapshot.session?.id
+            guard coordinator.start(task: task, duration: request.duration ?? 1500) else { return false }
+            if previousID != snapshot.session?.id {
                 isCompleting = false
                 completionError = nil
             }
-            previousTick = ProcessInfo.processInfo.systemUptime
         } else if request.action == "stop" {
+            if let sessionId = request.sessionId, sessionId != snapshot.session?.id { return acknowledge(request) }
             if request.taskId == nil || request.taskId == snapshot.session?.task.id {
-                snapshot.session?.end()
-                snapshot.requestId = request.id
-                save()
-                NSApp.terminate(nil)
-                return
+                guard coordinator.end(), acknowledge(request) else { return false }
+                hideForSync()
+                return true
             }
             // A late stop for the previous task must not affect the new card.
-            snapshot.requestId = request.id
-            save()
-            return
-        } else if request.action != "show" {
-            return
-        }
-        snapshot.requestId = request.id
+            return acknowledge(request)
+        } else if request.action != "show" { return false }
+        guard acknowledge(request) else { return false }
         render()
         growForTitle()
+        isHiddenForSync = false
         panel.orderFrontRegardless()
         save()
+        return true
     }
 
     @objc func togglePause() {
-        updateElapsed()
-        guard var session = snapshot.session else { return }
-        switch session.phase {
-        case .running: session.pause()
-        case .paused: session.resume()
-        case .finished, .ended: session = FocusSession(task: session.task, duration: session.duration)
-        }
-        snapshot.session = session
-        previousTick = ProcessInfo.processInfo.systemUptime
+        coordinator.togglePause()
         render()
-        save()
     }
 
     @objc func extendSession() {
-        updateElapsed()
-        snapshot.session?.extend()
+        coordinator.editSession { $0.extend() }
         render()
-        save()
     }
 
     @objc func changeFont() {
@@ -485,8 +590,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func changeDuration() {
         let durations = [900.0, 1500, 3000, 0]
         guard durations.indices.contains(durationPicker.indexOfSelectedItem) else { return }
-        updateElapsed()
-        snapshot.session?.setDuration(durations[durationPicker.indexOfSelectedItem])
+        coordinator.editSession { $0.setDuration(durations[durationPicker.indexOfSelectedItem]) }
         render()
         save()
     }
@@ -498,10 +602,9 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func completeTask() {
-        guard !isCompleting, let session = snapshot.session,
+        guard !isCompleting, let session = snapshot.session, session.phase != .ended,
               let url = session.completionDeeplink else { return }
-        updateElapsed()
-        snapshot.session?.pause()
+        guard coordinator.pause() else { return }
         completionError = nil
         // Discard the previous failure before retrying this same idempotent completion.
         try? FileManager.default.removeItem(at: directory.appendingPathComponent("completion.json"))
@@ -518,11 +621,12 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func consumeCompletion() {
         if let data = try? Data(contentsOf: directory.appendingPathComponent("completion.json")),
            let result = try? JSONDecoder().decode(FocusCompletionResult.self, from: data),
-           result.sessionId == snapshot.session?.id {
+           result.sessionId == snapshot.session?.id, snapshot.session?.phase != .ended {
             if result.success {
-                snapshot.session?.end()
+                guard coordinator.end() else { return }
+                isCompleting = false
                 save()
-                NSApp.terminate(nil)
+                hideForSync()
                 return
             }
             isCompleting = false
@@ -534,22 +638,30 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func endSession() {
-        updateElapsed()
-        snapshot.session?.end()
-        save()
-        NSApp.terminate(nil)
+        guard coordinator.end() else { return }
+        hideForSync()
     }
 
     @objc func suspend() {
-        updateElapsed()
-        snapshot.session?.pause()
+        _ = coordinator.pause()
         render()
         save()
     }
 
     @objc func wake() {
-        previousTick = ProcessInfo.processInfo.systemUptime
+        coordinator.resetClock()
+        coordinator.requestSync()
         render()
+    }
+
+    func hideForSync() {
+        isHiddenForSync = true
+        panel.orderOut(nil)
+        finishBackgroundIfPossible()
+    }
+
+    func finishBackgroundIfPossible() {
+        if !isProcessingRequests && isHiddenForSync && !coordinator.needsBackground && coordinator.storageError == nil { NSApp.terminate(nil) }
     }
 
     @objc func screenChanged() { constrainToScreen() }
@@ -569,9 +681,9 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowDidEndLiveResize(_ notification: Notification) { save() }
     func windowDidMove(_ notification: Notification) { save() }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        suspend()
-        NSApp.terminate(nil)
-        return true
+        guard coordinator.pause() else { return false }
+        hideForSync()
+        return false
     }
 
     func save() {
@@ -580,27 +692,21 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         snapshot.appearance.height = panel.frame.height
         snapshot.appearance.x = panel.frame.origin.x
         snapshot.appearance.y = panel.frame.origin.y
-        snapshot.updatedAt = Date().timeIntervalSince1970
-        do {
-            let file = directory.appendingPathComponent("state.json")
-            let data = try JSONEncoder().encode(snapshot)
-            try data.write(to: file, options: .atomic)
-            chmod(file.path, 0o600)
-            lastSave = ProcessInfo.processInfo.systemUptime
-        } catch {
-            // Keep the visible timer usable if the disk fills up; no credentials are stored here.
-            hintLabel.stringValue = "Kunne ikke lagre økten. Sjekk ledig diskplass."
-        }
+        if coordinator.persist() { lastSave = ProcessInfo.processInfo.systemUptime }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         ticker?.invalidate()
-        updateElapsed()
-        snapshot.session?.pause()
-        save()
+        if coordinator != nil {
+            coordinator.advance()
+            snapshot.session?.pause()
+            coordinator.closePeriod()
+            save()
+        }
         flock(lockDescriptor, LOCK_UN)
         close(lockDescriptor)
     }
+
 }
 
 @main

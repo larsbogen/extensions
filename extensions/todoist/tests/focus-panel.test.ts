@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,9 +25,28 @@ describe("floating focus panel bridge", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  async function requestFile() {
+    const files = (await readdir(join(directory, "requests"))).filter((name) => name.endsWith(".json")).sort();
+    return join(directory, "requests", files[0]);
+  }
+  let lastRequest: Record<string, unknown>;
   async function acknowledge() {
-    const request = JSON.parse(await readFile(join(directory, "request.json"), "utf8"));
-    await writeFile(join(directory, "state.json"), JSON.stringify({ requestId: request.id }));
+    const files = (await readdir(join(directory, "requests"))).filter((name) => name.endsWith(".json")).sort();
+    let state: { requestId?: string; acknowledgedRequests: string[] } = { acknowledgedRequests: [] };
+    try {
+      state = JSON.parse(await readFile(join(directory, "state.json"), "utf8"));
+      state.acknowledgedRequests ??= [];
+    } catch {
+      /* first startup */
+    }
+    for (const file of files) {
+      const request = JSON.parse(await readFile(join(directory, "requests", file), "utf8"));
+      expect((await stat(join(directory, "requests", file))).mode & 0o777).toBe(0o600);
+      lastRequest = request;
+      state = { requestId: request.id, acknowledgedRequests: [...state.acknowledgedRequests, request.id] };
+      await writeFile(join(directory, "state.json"), JSON.stringify(state));
+      await rm(join(directory, "requests", file), { force: true });
+    }
   }
 
   it("enables the completion command so Raycast can launch it from the card", async () => {
@@ -43,14 +62,14 @@ describe("floating focus panel bridge", () => {
     const client = createFocusPanelClient({ executable, directory, launch });
     const content = '**Lage dagsplan** for æøå 👩‍💻 — "viktig" `$(touch injected)` ' + "hele tittelen ".repeat(30);
     await client.start({ id: "id/with space", content }, 25);
-    const request = JSON.parse(await readFile(join(directory, "request.json"), "utf8"));
+    const request = lastRequest as { duration: number; task: { title: string; url: string; completionURL: string } };
     expect(request.duration).toBe(1500);
     expect(request.task.title).toContain('æøå 👩‍💻 — "viktig" $(touch injected)');
     expect(request.task.title).toContain("hele tittelen ".repeat(30));
     expect(request.task.url).toBe("https://todoist.com/app/task/id%2Fwith%20space");
     expect(request.task.completionURL).toContain("/complete-focused-task");
     expect(launch).toHaveBeenCalledWith(executable, directory);
-    expect((await stat(join(directory, "request.json"))).mode & 0o777).toBe(0o600);
+    expect((await stat(join(directory, "requests"))).mode & 0o777).toBe(0o700);
     expect((await stat(directory)).mode & 0o777).toBe(0o700);
   });
 
@@ -60,7 +79,7 @@ describe("floating focus panel bridge", () => {
       executable,
       directory,
       launch: async () => {
-        requests.push(JSON.parse(await readFile(join(directory, "request.json"), "utf8")));
+        requests.push(JSON.parse(await readFile(await requestFile(), "utf8")));
         await acknowledge();
       },
     });
@@ -68,6 +87,50 @@ describe("floating focus panel bridge", () => {
     await client.stop("a");
     expect(requests.map((request) => request.task?.id ?? request.taskId)).toEqual(["a", "b", "a"]);
     expect(requests[2].action).toBe("stop");
+  });
+
+  it("keeps project metadata and acknowledges concurrent independent Raycast clients", async () => {
+    let processing = Promise.resolve();
+    const launch = () => {
+      processing = processing.then(acknowledge);
+      return processing;
+    };
+    const first = createFocusPanelClient({ executable, directory, launch });
+    const second = createFocusPanelClient({ executable, directory, launch });
+    await Promise.all([
+      first.start({ id: "a", content: "A", projectId: "project-a" }, 25),
+      second.start({ id: "b", content: "B", projectId: "project-b" }, 25),
+    ]);
+    const state = JSON.parse(await readFile(join(directory, "state.json"), "utf8"));
+    expect(state.acknowledgedRequests).toHaveLength(2);
+    expect(lastRequest.task).toEqual(expect.objectContaining({ projectId: expect.stringMatching(/^project-/) }));
+    expect(await readdir(join(directory, "requests"))).toEqual([]);
+  });
+
+  it("can show pending Toggl work after the Todoist focus has been cleared", async () => {
+    const client = createFocusPanelClient({ executable, directory, launch: acknowledge });
+    expect(await client.showPending()).toBe(false);
+    await client.start({ id: "a", content: "A" }, 25);
+    await writeFile(
+      join(directory, "state.json"),
+      JSON.stringify({
+        session: { id: "saved-session", phase: "ended" },
+        tracking: { periods: [{ sync: "review" }] },
+      }),
+    );
+    expect(await client.showPending()).toBe(true);
+    expect(lastRequest.action).toBe("show");
+  });
+
+  it("targets stop to the saved session so a late command cannot stop a new session of the same task", async () => {
+    const client = createFocusPanelClient({ executable, directory, launch: acknowledge });
+    await client.start({ id: "a", content: "A" }, 25);
+    await writeFile(
+      join(directory, "state.json"),
+      JSON.stringify({ session: { id: "saved-session", task: { id: "a" } } }),
+    );
+    await client.stop("a");
+    expect(lastRequest).toEqual(expect.objectContaining({ taskId: "a", sessionId: "saved-session" }));
   });
 
   it("does not report success before the helper has acknowledged the request", async () => {

@@ -72,6 +72,19 @@ describe("complete from focus card", () => {
     expect(await result()).toEqual({ sessionId, success: true });
     expect(mocks.refresh).toHaveBeenCalledOnce();
   });
+  it("completes Todoist while warning that a durable Toggl stop is pending", async () => {
+    const file = join(directory, "state.json");
+    const snapshot = JSON.parse(await readFile(file, "utf8"));
+    snapshot.tracking = { periods: [{ sessionID: sessionId, sync: "updating" }] };
+    await writeFile(file, JSON.stringify(snapshot));
+    await completeFocusedTask(props);
+    expect(mocks.close).toHaveBeenCalledOnce();
+    expect(await result()).toEqual({ sessionId, success: true });
+    expect(mocks.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("Toggl venter") }),
+    );
+  });
+
   it("preserves focus after an API failure and retries with the same completion ID", async () => {
     mocks.close.mockRejectedValueOnce(new Error("offline"));
     await completeFocusedTask(props);

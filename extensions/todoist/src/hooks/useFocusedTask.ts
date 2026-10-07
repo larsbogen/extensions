@@ -10,7 +10,10 @@ export const useFocusedTask = ({ data, setData }: CachedDataParams) => {
 
   const { commandMode } = environment;
 
-  const [focusedTask, setFocusedTask] = useCachedState("todoist.focusedTask", { id: "", content: "" });
+  const [focusedTask, setFocusedTask] = useCachedState<{ id: string; content: string; projectId?: string }>(
+    "todoist.focusedTask",
+    { id: "", content: "" },
+  );
 
   async function clearFocusedTask() {
     if (!focusedTask.id) {
@@ -51,7 +54,7 @@ export const useFocusedTask = ({ data, setData }: CachedDataParams) => {
     }
   }
 
-  async function focusTask({ id, content, labels }: Task) {
+  async function focusTask({ id, content, labels, project_id }: Task) {
     try {
       if (focusedTask.id && focusedTask.id !== id && !(await unfocusTask())) return;
       if (focusLabelName && focusLabelName.trim().length > 0) {
@@ -61,9 +64,9 @@ export const useFocusedTask = ({ data, setData }: CachedDataParams) => {
         await updateTask({ id, labels: [...new Set([...labels, focusLabelName.trim()])] }, { data, setData });
       }
       // Preserve the full title; shortening belongs only in the menu bar renderer.
-      setFocusedTask({ id, content });
+      setFocusedTask({ id, content, projectId: project_id });
       if (process.platform === "darwin" && showFocusWindow !== false) {
-        await showFocusPanel({ id, content }, Number(focusDuration ?? "25"));
+        await showFocusPanel({ id, content, projectId: project_id }, Number(focusDuration ?? "25"));
         if (commandMode === "view") await closeMainWindow();
       } else if (commandMode === "view") {
         await showToast({ style: Toast.Style.Success, title: `Focus on "${content}" 🎯` });

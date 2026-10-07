@@ -64,6 +64,16 @@ export async function completeFocusedTask({ launchContext }: LaunchProps<{ launc
         }
       }
     }
+    const latest = JSON.parse(await readFile(join(directory, "state.json"), "utf8"));
+    const pendingToggl = latest.tracking?.periods?.some(
+      (period: { sessionID: string; sync: string }) =>
+        period.sessionID === sessionId && !["local", "synced", "accepted"].includes(period.sync),
+    );
+    if (pendingToggl) {
+      warning = [warning, "Toggl venter på synkronisering. En ekstern timer kan fortsatt gå."]
+        .filter(Boolean)
+        .join(" ");
+    }
     await result(true);
     await refreshMenuBarCommand();
     await showToast({

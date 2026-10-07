@@ -84,11 +84,70 @@ Raycasts generelle utseende blir ikke endret.
   påbegynt økt fortsettes manuelt. Ved et uventet prosesskrasj kan inntil fem sekunder
   siden siste lagring gå tapt.
 
-Kortet er en liten AppKit-hjelpeapp som bare kjører når en fokusøkt vises. Den får tittel,
-oppgave-ID og oppgavelenke gjennom lokale JSON-filer under utvidelsens supportmappe
-(`focus-panel/`). Den får ingen Todoist-token og gjør ingen nettverkskall.
-App- og nettstedblokkering og Toggl-integrasjon er ikke del av denne versjonen.
-Windows beholder den eksisterende menylinjefunksjonen.
+Kortet er en AppKit-hjelpeapp som får oppgavemetadata gjennom lokale JSON-filer under
+utvidelsens supportmappe (`focus-panel/`). Den får ingen Todoist-token. Med Toggl
+aktivert gjør hjelpeappen egne Toggl-kall og kan fortsette synkronisering etter at
+kortet er lukket. App- og nettstedblokkering inngår ikke. Windows beholder den
+eksisterende menylinjefunksjonen.
+
+### Toggl Track i fokuskortet
+
+Velg **Koble til Toggl**, lim inn API-tokenet fra Toggl-profilen, og velg
+arbeidsområde og standardprosjekt eller **Uten prosjekt**. Tokenet lagres bare i
+macOS-nøkkelringen. Det sendes ikke gjennom Raycast-broen eller skrives til lokale
+JSON-filer eller logger. macOS kan be om nøkkelringtilgang etter at den lokalt
+signerte hjelpeappen er bygget på nytt. Tilgangsfeil vises i kortet.
+
+- **Registrer i Toggl** styrer føring fra handlingstidspunktet. Tid jobbet mens
+  bryteren var av, etterregistreres ikke. Prosjektvalg huskes per Todoist-prosjekt,
+  Toggl-konto og arbeidsområde. Eldre fokusoppgaver uten prosjekt-ID bruker standarden.
+- Oppgavetittelen blir beskrivelsen. Todoist-lenken kan slås på i innstillingene.
+  Prosjektlisten kan oppdateres manuelt; innstillingene oppdaterer automatisk en
+  liste som er eldre enn 24 timer.
+- **Arbeidstid i økten** er samlet lokal aktiv tid. Nedtellingen viser fortsatt tid
+  igjen. **⌘P** pauser/fortsetter, **⌘+** forlenger og **⌘↵** fullfører oppgaven.
+- Pause, utløp, oppgave-/prosjektbytte, lukking, skjermlås og dvale avslutter den
+  aktuelle arbeidsperioden. Fortsett og **+5 min** etter utløp åpner en ny periode.
+  12 minutter arbeid, 5 minutter pause og 8 minutter arbeid gir to registreringer
+  med til sammen 20 minutter.
+- **Registrerer i Toggl** betyr bekreftet ekstern oppstart. Nettbrudd og API-kvoter
+  gir lokal kø. Når stopp ikke er bekreftet, opplyser kortet at den eksterne timeren
+  kan fortsette. Stopp synkroniseres med det lagrede tidspunktet.
+- En annen aktiv timer krever et valg: **Bytt til fokusoppgaven** eller **Fortsett
+  uten Toggl**. Endringer gjort direkte i Toggl oppdages ved neste synkronisering;
+  kortet pauser og lar deg beholde Toggl-versjonen eller erstatte den med lokal tid.
+- Ved uklart opprettelsessvar vises **Se gjennom**. Kontroller kandidater i Toggl,
+  og knytt eventuelt til en eksisterende registrering. Automatisk ny opprettelse
+  forsøkes aldri etter et mulig gjennomført kall, heller ikke ved tomt oppslag.
+- Etter krasj stoppes en kjent fokusregistrering ved siste lagrede kontrollpunkt.
+  Det usikre intervallet markeres for gjennomgang, med mulighet til å korrigere
+  stoppetiden. Normalt kan opptil fem sekunder siden siste lagring mangle.
+- **Fullfør oppgave** lagrer stopp før Todoist-kallet. Todoist kan fullføres mens
+  Toggl venter; meldingen opplyser da om uavklart synkronisering. **Show Focus Window**
+  kan åpne ventende Toggl-arbeid også etter at Todoist-fokuset er fjernet.
+
+Køen lagres før nettverkskall og overlever omstart. Hjelpeappen kjører videre uten
+synlig kort mens automatiske forsøk gjenstår. Den avsluttes når køen er ferdig eller
+krever et valg. Etter maskinomstart starter den ved neste fokusbruk; integrasjonen
+installerer ingen innloggingstjeneste. Gamle perioder beholder sin opprinnelige
+konto og sitt arbeidsområde ved kontobytte. Allerede lagrede kontotoken kan brukes
+for å avslutte disse periodene; ingen perioder flyttes til den nye kontoen.
+
+Lokal tilstand migreres fra versjon 1 til 2. Tid fra eldre økter beholdes lokalt,
+uten å finne på historiske starttidspunkter eller sende den til Toggl. Ikke bruk en
+eldre hjelpeapp mot migrerte fokusdata.
+
+Synkroniseringen bruker separate, vedvarende budsjetter for bruker- og
+organisasjonskall, mellomlagring og forsinkede nye forsøk. HTTP 402 og 429 stopper
+videre kall innen det aktuelle budsjettet. Andre integrasjoner kan bruke den samme
+Toggl-kvoten; lokale budsjetter garanterer derfor ikke at et stopp kan sendes straks.
+Rapporter, ukeoversikt, etikettkoblinger og fakturerbar tid inngår ikke.
+
+`npm run test:focus` bruker falsk klokke og simulerte Toggl-svar. Testene dekker
+blant annet nøyaktig aktiv tid, frakoblet arbeid, omstart, uklare svar, kvoter,
+eksterne endringer, kontobytte, lagringsfeil og migrering. `npm test` kontrollerer
+JSON-broen, samtidige Raycast-kommandoer og Todoist-fullføring. Automatiske tester
+bruker ingen ekte kontoer eller token.
 
 Bygging krever eksisterende Xcode Command Line Tools på macOS. `npm run build` og
 `npm run dev` bygger hjelpeappen først. Ved endring i Swift-koden mens den lokale

@@ -15,15 +15,18 @@ const assets = join(project, "assets", "focus-panel", "FocusPanel.app", "Content
 mkdirSync(work, { recursive: true });
 mkdirSync(join(assets, "MacOS"), { recursive: true });
 const common = ["-module-cache-path", join(work, "module-cache"), "-swift-version", "5"];
+const modelSources = ["FocusSession.swift", "TrackingState.swift", "TogglClient.swift", "FocusCoordinator.swift"].map(
+  (name) => join(source, name),
+);
 const run = (args) => execFileSync("/usr/bin/xcrun", ["swiftc", ...common, ...args], { stdio: "inherit" });
 
 if (process.argv.includes("--test")) {
   const test = join(work, "session-tests");
-  run([join(source, "FocusSession.swift"), join(source, "SessionTests.swift"), "-o", test]);
+  run([...modelSources, join(source, "SessionTests.swift"), join(source, "TrackingTests.swift"), "-o", test]);
   execFileSync(test, [], { stdio: "inherit" });
 } else {
   const binary = join(work, "FocusPanel");
-  run([join(source, "FocusSession.swift"), join(source, "FocusPanel.swift"), "-O", "-o", binary]);
+  run([...modelSources, join(source, "FocusPanel.swift"), join(source, "TogglUI.swift"), "-O", "-o", binary]);
   execFileSync("/usr/bin/codesign", ["--force", "--sign", "-", binary], { stdio: "inherit" });
   // Replace only after compilation succeeds, so the local watcher never sees a partial binary.
   renameSync(binary, join(assets, "MacOS", "FocusPanel"));

@@ -1,13 +1,17 @@
 import { Cache, closeMainWindow, getPreferenceValues, showToast, Toast } from "@raycast/api";
 import { showFailureToast } from "@raycast/utils";
 
-import { showFocusPanel } from "./focus/panel";
+import { showFocusPanel, showPendingFocusPanel } from "./focus/panel";
 
 export default async function command() {
   try {
     const raw = new Cache().get("todoist.focusedTask");
     const task = raw ? JSON.parse(raw) : undefined;
     if (!task?.id || !task?.content) {
+      if (await showPendingFocusPanel()) {
+        await closeMainWindow();
+        return;
+      }
       await showToast({ style: Toast.Style.Failure, title: "Velg «Focus Task» på en oppgave først" });
       return;
     }

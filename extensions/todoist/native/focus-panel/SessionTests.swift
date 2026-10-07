@@ -58,6 +58,7 @@ struct SessionTests {
         let retryJSON = retry.queryItems!.first(where: { $0.name == "context" })!.value!
         let retryContext = try JSONDecoder().decode([String: String].self, from: Data(retryJSON.utf8))
         assert(retryContext == context, "Retries reuse the same idempotent session ID")
+        try TrackingTests.run()
         print("Focus session checks passed: pause, resume, expiry, extension, recovery, open-ended, bounds, persistence, completion deeplink.")
     }
 }
