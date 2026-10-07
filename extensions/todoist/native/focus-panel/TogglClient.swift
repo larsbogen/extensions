@@ -83,8 +83,49 @@ enum TogglError: Error {
     }
 }
 
+struct TogglResponseMetadata {
+    var quotaRemaining: Int?
+    var quotaResetsIn: Double?
+    var retryAfter: Double?
+
+    init(quotaRemaining: Int? = nil, quotaResetsIn: Double? = nil, retryAfter: Double? = nil) {
+        self.quotaRemaining = quotaRemaining
+        self.quotaResetsIn = quotaResetsIn
+        self.retryAfter = retryAfter
+    }
+
+    init(response: HTTPURLResponse, now: Double) {
+        self.init()
+        if let raw = response.value(forHTTPHeaderField: "X-Toggl-Quota-Remaining"),
+           let value = Int(raw.trimmingCharacters(in: .whitespaces)), value >= 0 { quotaRemaining = value }
+        quotaResetsIn = Self.seconds(response.value(forHTTPHeaderField: "X-Toggl-Quota-Resets-In"))
+        if let raw = response.value(forHTTPHeaderField: "Retry-After") {
+            retryAfter = Self.seconds(raw)
+            if retryAfter == nil {
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.timeZone = TimeZone(secondsFromGMT: 0)
+                formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+                if let date = formatter.date(from: raw) { retryAfter = max(0, date.timeIntervalSince1970 - now) }
+            }
+        }
+    }
+
+    static func seconds(_ raw: String?) -> Double? {
+        guard let raw = raw, let value = Double(raw.trimmingCharacters(in: .whitespaces)),
+              value.isFinite, value >= 0 else { return nil }
+        return value
+    }
+}
+
+// Keep headers even when HTTP or JSON decoding fails.
+struct TogglResponse<Value> {
+    var result: Result<Value, TogglError>
+    var metadata = TogglResponseMetadata()
+}
+
 protocol TogglTransport {
-    func send(_ request: URLRequest, completion: @escaping (Result<Data, TogglError>) -> Void)
+    func send(_ request: URLRequest, completion: @escaping (TogglResponse<Data>) -> Void)
 }
 
 final class TogglURLTransport: NSObject, TogglTransport, URLSessionTaskDelegate {
@@ -94,9 +135,12 @@ final class TogglURLTransport: NSObject, TogglTransport, URLSessionTaskDelegate 
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         completionHandler(nil)
     }
-    func send(_ request: URLRequest, completion: @escaping (Result<Data, TogglError>) -> Void) {
+    func send(_ request: URLRequest, completion: @escaping (TogglResponse<Data>) -> Void) {
         session.dataTask(with: request) { data, response, error in
             let result: Result<Data, TogglError>
+            let metadata = (response as? HTTPURLResponse).map {
+                TogglResponseMetadata(response: $0, now: Date().timeIntervalSince1970)
+            } ?? TogglResponseMetadata()
             if let error = error as? URLError {
                 let preflight: [URLError.Code] = [.notConnectedToInternet, .cannotFindHost, .dnsLookupFailed, .cannotConnectToHost]
                 result = .failure(.network(!preflight.contains(error.code)))
@@ -106,11 +150,10 @@ final class TogglURLTransport: NSObject, TogglTransport, URLSessionTaskDelegate 
                 if (200..<300).contains(response.statusCode), let data = data {
                     result = .success(data)
                 } else {
-                    let retry = response.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init)
-                    result = .failure(.http(response.statusCode, retry))
+                    result = .failure(.http(response.statusCode, metadata.retryAfter))
                 }
             } else { result = .failure(.invalidResponse) }
-            DispatchQueue.main.async { completion(result) }
+            DispatchQueue.main.async { completion(TogglResponse(result: result, metadata: metadata)) }
         }.resume()
     }
 }
@@ -123,7 +166,7 @@ final class TogglClient {
         self.credentials = credentials
     }
     func request<T: Decodable>(_ method: String, path: String, account: Int64?, token: String? = nil,
-                               body: [String: Any]? = nil, completion: @escaping (Result<T, TogglError>) -> Void) {
+                               body: [String: Any]? = nil, completion: @escaping (TogglResponse<T>) -> Void) {
         do {
             let secret: String
             if let token = token { secret = token }
@@ -136,13 +179,14 @@ final class TogglClient {
             request.setValue("Basic " + Data("\(secret):api_token".utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             if let body = body { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
-            transport.send(request) { result in
-                completion(result.flatMap { data in
+            transport.send(request) { response in
+                let result: Result<T, TogglError> = response.result.flatMap { data in
                     do { return .success(try JSONDecoder().decode(T.self, from: data)) }
                     catch { return .failure(.invalidResponse) }
-                })
+                }
+                completion(TogglResponse(result: result, metadata: response.metadata))
             }
-        } catch let error as TogglError { completion(.failure(error)) }
-        catch { completion(.failure(.invalidResponse)) }
+        } catch let error as TogglError { completion(TogglResponse(result: .failure(error))) }
+        catch { completion(TogglResponse(result: .failure(.invalidResponse))) }
     }
 }

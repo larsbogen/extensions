@@ -136,7 +136,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         render()
         if !isHiddenForSync { panel.orderFrontRegardless() }
         save()
-        coordinator.requestSync()
+        coordinator.requestSync(mode: .activePeriod)
         ticker = Timer(timeInterval: 0.5, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
         ticker?.tolerance = 0.1
         RunLoop.main.add(ticker!, forMode: .common)
@@ -650,7 +650,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc func wake() {
         coordinator.resetClock()
-        coordinator.requestSync()
+        coordinator.requestSync(mode: .activePeriod)
         render()
     }
 

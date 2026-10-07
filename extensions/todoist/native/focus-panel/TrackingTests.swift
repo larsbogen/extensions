@@ -7,11 +7,15 @@ private final class TestClock {
 }
 private final class MemoryCredentials: TogglCredentials {
     var tokens: [Int64: String] = [1: "test-secret-never-persist"]
+    var failSave = false
     func token(accountID: Int64) throws -> String {
         guard let value = tokens[accountID] else { throw TogglError.credentials }
         return value
     }
-    func save(token: String, accountID: Int64) throws { tokens[accountID] = token }
+    func save(token: String, accountID: Int64) throws {
+        if failSave { throw TogglError.credentials }
+        tokens[accountID] = token
+    }
 }
 private final class FakeToggl: TogglTransport {
     var requests: [URLRequest] = []
@@ -24,20 +28,28 @@ private final class FakeToggl: TogglTransport {
     var holdUpdate = false
     var held: (() -> Void)?
     var beforeRequest: ((URLRequest) -> Void)?
+    var metadata: ((URLRequest) -> TogglResponseMetadata)?
+    var overrideResponse: ((URLRequest) -> TogglResponse<Data>?)?
+    var holdRead = false
+    var profileID: Int64 = 1
     var creates: Int { requests.filter { $0.httpMethod == "POST" }.count }
-    func send(_ request: URLRequest, completion: @escaping (Result<Data, TogglError>) -> Void) {
+    func send(_ request: URLRequest, completion: @escaping (TogglResponse<Data>) -> Void) {
+        let finish: (Result<Data, TogglError>) -> Void = { result in
+            completion(TogglResponse(result: result, metadata: self.metadata?(request) ?? TogglResponseMetadata()))
+        }
         beforeRequest?(request)
         requests.append(request)
-        if let error = failure?(request) { completion(.failure(error)); return }
+        if let response = overrideResponse?(request) { completion(response); return }
+        if let error = failure?(request) { finish(.failure(error)); return }
         let path = request.url!.path
         let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
-        func respond<T: Encodable>(_ value: T) { completion(.success(try! JSONEncoder().encode(value))) }
+        func respond<T: Encodable>(_ value: T) { finish(.success(try! JSONEncoder().encode(value))) }
         if request.httpMethod == "GET" && path.hasSuffix("/current") {
             respond(entries.values.first { $0.isRunning })
         } else if request.httpMethod == "GET" && path.hasSuffix("/time_entries") {
             respond(Array(entries.values))
         } else if request.httpMethod == "GET" && path.hasSuffix("/me") {
-            completion(.success(Data("{\"id\":1,\"workspaces\":[{\"id\":10,\"name\":\"Work\",\"organization_id\":20}],\"projects\":[]}".utf8)))
+            finish(.success(Data("{\"id\":\(profileID),\"workspaces\":[{\"id\":10,\"name\":\"Work\",\"organization_id\":20}],\"projects\":[]}".utf8)))
         } else if request.httpMethod == "POST" {
             let entry = TogglEntry(id: nextID, workspace_id: (body["workspace_id"] as! NSNumber).int64Value,
                 project_id: (body["project_id"] as? NSNumber)?.int64Value,
@@ -46,7 +58,7 @@ private final class FakeToggl: TogglTransport {
             nextID += 1
             entries[entry.id] = entry
             let response = {
-                if let error = self.afterCreateFailure { self.afterCreateFailure = nil; completion(.failure(error)) }
+                if let error = self.afterCreateFailure { self.afterCreateFailure = nil; finish(.failure(error)) }
                 else { respond(entry) }
             }
             if holdCreate { holdCreate = false; held = response } else { response() }
@@ -58,11 +70,14 @@ private final class FakeToggl: TogglTransport {
                 if let duration = body["duration"] as? Int { entry.duration = duration }
                 if body.keys.contains("project_id") { entry.project_id = (body["project_id"] as? NSNumber)?.int64Value }
                 entries[id] = entry
-                if let error = afterUpdateFailure { afterUpdateFailure = nil; completion(.failure(error)); return }
+                if let error = afterUpdateFailure { afterUpdateFailure = nil; finish(.failure(error)); return }
                 if holdUpdate { holdUpdate = false; held = { respond(entry) }; return }
             }
+            if request.httpMethod == "GET" && holdRead {
+                holdRead = false; held = { respond(entry) }; return
+            }
             respond(entry)
-        } else { completion(.failure(.http(404, nil))) }
+        } else { finish(.failure(.http(404, nil))) }
     }
 }
 
@@ -106,6 +121,7 @@ private final class TrackingHarness {
 
 enum TrackingTests {
     static func run() throws {
+        try quotaTests()
         do {
             let h = TrackingHarness()
             h.start(); h.work(720); h.engine.pause()
@@ -189,7 +205,7 @@ enum TrackingTests {
             let h = TrackingHarness()
             h.start(); h.work(30)
             h.server.entries[100]?.description = "Redigert i Toggl"
-            h.engine.requestSync()
+            h.engine.requestSync(mode: .currentSession)
             assert(h.engine.snapshot.session?.phase == .paused)
             assert(h.periods[0].sync == .review)
             assert(h.periods[0].externalVersion?.description == "Redigert i Toggl")
@@ -201,7 +217,7 @@ enum TrackingTests {
             let h = TrackingHarness()
             h.start(); h.work(30)
             h.server.entries[100]?.description = "Endret"
-            h.engine.requestSync()
+            h.engine.requestSync(mode: .currentSession)
             h.engine.useLocal(h.periods[0].id)
             assert(h.server.entries[100]?.description == h.task.title)
             assert(h.server.entries[100]?.duration == 30)
@@ -384,5 +400,240 @@ enum TrackingTests {
             do { _ = try store.load(); assertionFailure("Corrupt data must not become a fresh session") } catch {}
         }
         print("Toggl checks passed: exact periods, offline/restart, recovery, durable intent, ambiguity, quotas, external edits, takeover, late responses, storage failure, migration and credentials.")
+    }
+
+    static func quotaTests() throws {
+        // Ordinary pause/resume must have linear, predictable request cost.
+        do {
+            let h = TrackingHarness()
+            h.start(duration: 0)
+            for index in 1...5 {
+                h.work(60); h.engine.pause()
+                assert(h.server.requests.filter { $0.httpMethod == "GET" }.count == index * 2)
+                assert(h.server.requests.filter { $0.httpMethod != "GET" }.count == index * 2)
+                if index < 5 { h.engine.togglePause() }
+            }
+            h.engine.togglePause()
+            assert(h.server.creates == 6 && h.periods.last?.sync == .running && h.engine.nextRetry == nil)
+            let count = h.server.requests.count
+            for _ in 0..<3600 { h.work(1); h.engine.retryIfDue() }
+            assert(h.server.requests.count == count, "Uninterrupted work must not poll Toggl")
+        }
+        // History is explicitly refreshed, but never fetched by pause/resume/wake.
+        do {
+            let h = TrackingHarness()
+            h.start(); h.work(60); h.engine.pause()
+            h.server.entries[100]?.description = "Changed after synchronization"
+            h.engine.togglePause(); h.work(60); h.engine.pause()
+            assert(h.engine.reviewPeriods.isEmpty)
+            let count = h.server.requests.count
+            h.engine.requestSync(mode: .activePeriod)
+            assert(h.server.requests.count == count)
+            h.engine.requestSync(mode: .currentSession)
+            assert(h.periods[0].sync == .review)
+        }
+        // Writes still check for external edits even without a manual refresh.
+        do {
+            let h = TrackingHarness()
+            h.start(); h.work(10)
+            h.server.entries[100]?.description = "Changed while running"
+            h.engine.pause()
+            assert(h.periods[0].sync == .review)
+            assert(!h.server.requests.contains { $0.httpMethod == "PUT" })
+        }
+        // A repeated manual request during a batch must not requeue checked IDs.
+        do {
+            let h = TrackingHarness()
+            h.start(); h.work(10); h.engine.pause()
+            h.engine.togglePause(); h.work(10); h.engine.pause()
+            let count = h.server.requests.count
+            h.server.beforeRequest = { request in
+                if request.url!.path.hasSuffix("/101") { h.server.holdRead = true }
+            }
+            h.engine.requestSync(mode: .currentSession)
+            assert(h.engine.busy)
+            h.engine.requestSync(mode: .currentSession)
+            h.server.beforeRequest = nil
+            h.server.held?()
+            assert(h.server.requests.count == count + 2)
+            assert(!h.engine.busy)
+        }
+        // History cannot spend the last two calls; a pending stop still can.
+        for useServerQuota in [false, true] {
+            let h = TrackingHarness()
+            h.start(); h.work(10); h.engine.pause(); h.engine.togglePause(); h.work(10)
+            h.engine.snapshot.tracking.budgets["user:1"] = useServerQuota
+                ? RequestBudget(serverRemaining: 2, serverResetAt: h.clock.wall + 100)
+                : RequestBudget(attempts: Array(repeating: h.clock.wall, count: 28))
+            let count = h.server.requests.count
+            h.engine.requestSync(mode: .currentSession)
+            assert(h.server.requests.count == count)
+            h.engine.pause()
+            assert(h.periods[1].sync == .synced)
+            assert(h.server.requests.count == count + 2)
+        }
+        // Headers on successful responses reflect other integrations' usage.
+        do {
+            let h = TrackingHarness()
+            h.server.metadata = { request in
+                request.url!.path.hasSuffix("/current")
+                    ? TogglResponseMetadata(quotaRemaining: 0, quotaResetsIn: 20) : TogglResponseMetadata()
+            }
+            h.start(); h.work(3); h.engine.pause()
+            let count = h.server.requests.count
+            assert(h.engine.pendingStop && h.engine.nextRetry == h.clock.wall + 17)
+            h.restart(after: 10)
+            assert(h.server.requests.count == count)
+            h.clock.advance(7); h.engine.retryIfDue()
+            assert(h.periods[0].sync == .synced && h.server.entries[100]?.duration == 3)
+        }
+        // Missing/invalid headers never replenish a previous quota observation.
+        do {
+            let h = TrackingHarness()
+            h.server.metadata = { request in
+                request.url!.path.hasSuffix("/current")
+                    ? TogglResponseMetadata(quotaRemaining: 4) : TogglResponseMetadata()
+            }
+            h.start()
+            let until = h.clock.wall + 3600
+            h.engine.requestSync(mode: .activePeriod)
+            h.engine.requestSync(mode: .activePeriod)
+            assert(h.engine.snapshot.tracking.budgets["user:1"]?.serverRemaining == 2)
+            assert(h.engine.snapshot.tracking.budgets["user:1"]?.serverResetAt == until)
+            let count = h.server.requests.count
+            h.engine.requestSync(mode: .activePeriod)
+            assert(h.server.requests.count == count && h.engine.nextRetry == until)
+        }
+        // A blocked organization must not cause repeated user verification reads.
+        do {
+            let h = TrackingHarness()
+            h.start(); h.work(10)
+            h.engine.snapshot.tracking.budgets["org:1:20"] = RequestBudget(serverRemaining: 0, serverResetAt: h.clock.wall + 30)
+            h.engine.snapshot.tracking.budgets["user:1"] = RequestBudget(serverRemaining: 0, serverResetAt: h.clock.wall + 60)
+            let count = h.server.requests.count
+            h.engine.pause()
+            assert(h.engine.nextRetry == h.clock.wall + 60)
+            h.engine.requestSync(mode: .currentSession)
+            h.restart(after: 30)
+            assert(h.server.requests.count == count)
+            h.clock.advance(30); h.engine.retryIfDue()
+            assert(h.server.entries[100]?.duration == 10)
+        }
+        // 402 waits use server guidance, survive restart, and retain the true stop.
+        let waits: [(Double?, Double?, Double)] = [(10, nil, 10), (nil, 20, 20), (10, 20, 20), (nil, nil, 3600), (0, nil, 1)]
+        for (retry, reset, delay) in waits {
+            let h = TrackingHarness()
+            h.start(); h.work(10)
+            h.server.failure = { $0.httpMethod == "PUT" ? .http(402, retry) : nil }
+            h.server.metadata = { $0.httpMethod == "PUT" ? TogglResponseMetadata(quotaResetsIn: reset) : TogglResponseMetadata() }
+            h.engine.pause()
+            let count = h.server.requests.count
+            let until = h.clock.wall + delay
+            assert(h.engine.nextRetry == until)
+            h.engine.requestSync(mode: .currentSession)
+            assert(h.server.requests.count == count)
+            h.server.failure = nil; h.server.metadata = nil
+            h.restart(after: delay / 2)
+            assert(h.server.requests.count == count && h.engine.nextRetry == until)
+            h.clock.advance(delay / 2); h.engine.retryIfDue()
+            assert(h.server.entries[100]?.duration == 10 && !h.engine.pendingStop)
+        }
+        // Both local and server constraints apply, even after a short 402 wait.
+        do {
+            let h = TrackingHarness()
+            h.start(); h.work(10)
+            h.server.metadata = { request in
+                request.httpMethod == "GET" ? TogglResponseMetadata(quotaRemaining: 0, quotaResetsIn: 120) : TogglResponseMetadata()
+            }
+            h.server.failure = { $0.httpMethod == "PUT" ? .http(402, 10) : nil }
+            h.engine.pause()
+            assert(h.engine.nextRetry == h.clock.wall + 120)
+        }
+        do {
+            var budget = RequestBudget(attempts: Array(repeating: 100, count: 30), serverRemaining: 0, serverResetAt: 120)
+            assert(budget.earliest(now: 110, urgent: true) == 3700)
+            assert(budget.earliest(now: 120, urgent: true) == 3700)
+            assert(budget.serverRemaining == nil)
+        }
+        // User and organization quotas stay independent, including token changes.
+        do {
+            let h = TrackingHarness()
+            h.engine.snapshot.tracking.budgets["user:1"] = RequestBudget(attempts: [h.clock.wall], blockedUntil: h.clock.wall + 50)
+            h.server.profileID = 2
+            h.server.metadata = { _ in TogglResponseMetadata(quotaRemaining: 0, quotaResetsIn: 90) }
+            h.engine.connect(token: "second-test-token") { result in
+                guard case .success(let profile) = result else { assertionFailure(); return }
+                assert(profile.id == 2)
+            }
+            let budgets = h.engine.snapshot.tracking.budgets
+            assert(budgets["user:1"]?.attempts.count == 1 && budgets["user:1"]?.blockedUntil == h.clock.wall + 50)
+            assert(budgets["user:2"]?.serverRemaining == 0 && budgets["user:2"]?.serverResetAt == h.clock.wall + 90)
+            assert(budgets["user:0"] == nil)
+            let saved = try JSONDecoder().decode(FocusSnapshot.self, from: h.saved!)
+            assert(saved.tracking.budgets["user:2"]?.serverRemaining == 0)
+        }
+        // Header parsing and JSON errors exercise the real client, without HTTP.
+        do {
+            let h = TrackingHarness()
+            h.credentials.failSave = true
+            h.server.metadata = { _ in TogglResponseMetadata(quotaRemaining: 0, quotaResetsIn: 90) }
+            var failed = false
+            h.engine.connect(token: "test-token") { result in
+                if case .failure(.credentials) = result { failed = true }
+            }
+            let saved = try JSONDecoder().decode(FocusSnapshot.self, from: h.saved!)
+            assert(failed && saved.tracking.budgets["user:0"]?.serverRemaining == 0)
+            assert(saved.tracking.budgets["user:0"]?.serverResetAt == h.clock.wall + 90)
+        }
+        func headers(_ values: [String: String], now: Double = 1_700_000_000) -> TogglResponseMetadata {
+            let response = HTTPURLResponse(url: URL(string: "https://api.track.toggl.com")!, statusCode: 200,
+                                           httpVersion: "HTTP/1.1", headerFields: values)!
+            return TogglResponseMetadata(response: response, now: now)
+        }
+        do {
+            let metadata = headers(["x-toggl-quota-remaining": "0", "X-Toggl-Quota-Resets-In": "20", "Retry-After": "10"])
+            assert(metadata.quotaRemaining == 0 && metadata.quotaResetsIn == 20 && metadata.retryAfter == 10)
+            assert(headers(["Retry-After": "Tue, 14 Nov 2023 22:13:30 GMT"]).retryAfter == 10)
+            assert(headers(["Retry-After": "Tue, 14 Nov 2023 22:13:00 GMT"]).retryAfter == 0)
+            for invalid in ["garbage", "-1", "NaN", "Infinity"] {
+                let parsed = headers(["X-Toggl-Quota-Remaining": invalid, "X-Toggl-Quota-Resets-In": invalid, "Retry-After": invalid])
+                assert(parsed.quotaRemaining == nil && parsed.quotaResetsIn == nil && parsed.retryAfter == nil)
+            }
+            let h = TrackingHarness()
+            h.server.overrideResponse = { _ in TogglResponse(result: .success(Data("not JSON".utf8)), metadata: metadata) }
+            var received = false
+            h.engine.client.request("GET", path: "/me", account: 1) { (response: TogglResponse<TogglProfile>) in
+                guard case .failure(.invalidResponse) = response.result else { assertionFailure(); return }
+                received = true
+                assert(response.metadata.quotaRemaining == 0 && response.metadata.quotaResetsIn == 20)
+            }
+            assert(received)
+            h.start()
+            assert(h.engine.snapshot.tracking.budgets["user:1"]?.serverRemaining == 0)
+            let count = h.server.requests.count
+            h.engine.requestSync()
+            assert(h.server.requests.count == count)
+        }
+        do {
+            let h = TrackingHarness()
+            let metadata = headers(["Retry-After": "Tue, 14 Nov 2023 22:13:30 GMT"])
+            h.server.overrideResponse = { _ in TogglResponse(result: .failure(.http(429, nil)), metadata: metadata) }
+            h.start()
+            assert(h.engine.nextRetry == h.clock.wall + 10)
+            h.server.overrideResponse = nil
+            h.clock.advance(10); h.engine.retryIfDue()
+            assert(h.periods[0].sync == .running)
+        }
+        // Optional fields need no migration or version change.
+        do {
+            let legacy = Data("{\"attempts\":[100],\"blockedUntil\":200,\"failures\":1}".utf8)
+            let budget = try JSONDecoder().decode(RequestBudget.self, from: legacy)
+            assert(budget.serverRemaining == nil && budget.serverResetAt == nil && budget.attempts == [100])
+            var snapshot = FocusSnapshot()
+            snapshot.tracking.budgets["user:1"] = budget
+            let restored = try JSONDecoder().decode(FocusSnapshot.self, from: JSONEncoder().encode(snapshot))
+            assert(restored.version == 2 && restored.tracking.budgets["user:1"]?.blockedUntil == 200)
+        }
+        print("Quota checks passed: 10 user + 10 organization calls for five periods, idle, sync modes, reserves, headers, retries, restart and compatibility.")
     }
 }

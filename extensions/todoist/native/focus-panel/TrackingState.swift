@@ -136,11 +136,49 @@ struct RequestBudget: Codable {
     var attempts: [Double] = []
     var blockedUntil: Double = 0
     var failures = 0
+    // Optional fields keep version-2 snapshots from older helpers readable.
+    var serverRemaining: Int?
+    var serverResetAt: Double?
 
     mutating func earliest(now: Double, urgent: Bool) -> Double {
         attempts.removeAll { $0 <= now - 3600 }
+        attempts.sort()
+        if let reset = serverResetAt, reset <= now {
+            serverRemaining = nil
+            serverResetAt = nil
+        }
         let limit = urgent ? 30 : 28 // Leave room for stopping an active timer.
-        return max(blockedUntil, attempts.count >= limit ? (attempts.first ?? now) + 3600 : now)
+        let local = attempts.count >= limit ? attempts[attempts.count - limit] + 3600 : now
+        let server = (serverRemaining ?? Int.max) <= (urgent ? 0 : 2) ? (serverResetAt ?? now + 3600) : now
+        return max(now, blockedUntil, local, server)
+    }
+
+    mutating func reserve(now: Double) {
+        attempts.append(now)
+        if let remaining = serverRemaining { serverRemaining = max(0, remaining - 1) }
+    }
+
+    mutating func observe(_ metadata: TogglResponseMetadata, now: Double) {
+        if let remaining = metadata.quotaRemaining {
+            serverRemaining = remaining
+            serverResetAt = now + max(1, metadata.quotaResetsIn ?? 3600)
+        } else if let reset = metadata.quotaResetsIn, serverRemaining != nil {
+            // A reset header alone must not replenish the known remaining count.
+            serverResetAt = now + max(1, reset)
+        }
+    }
+
+    mutating func merge(_ other: RequestBudget, now: Double) {
+        var other = other
+        _ = earliest(now: now, urgent: true)
+        _ = other.earliest(now: now, urgent: true)
+        attempts = (attempts + other.attempts).sorted()
+        blockedUntil = max(blockedUntil, other.blockedUntil)
+        failures = max(failures, other.failures)
+        if let remaining = other.serverRemaining {
+            serverRemaining = min(serverRemaining ?? remaining, remaining)
+            serverResetAt = max(serverResetAt ?? now, other.serverResetAt ?? now + 3600)
+        }
     }
 }
 

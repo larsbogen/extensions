@@ -1,5 +1,9 @@
 import Foundation
 
+enum TogglSyncMode {
+    case pendingWork, activePeriod, currentSession
+}
+
 // All entry points and transport completions run on the main queue. One writer,
 // one in-flight HTTP operation, and a persisted intent before every remote write.
 final class FocusCoordinator {
@@ -13,6 +17,7 @@ final class FocusCoordinator {
     private(set) var busy = false
     private(set) var nextRetry: Double?
     private var verifyIDs = Set<String>()
+    private var verifiedIDs = Set<String>()
     private var previousUptime: Double
     private var previousWall: Double
 
@@ -226,10 +231,12 @@ final class FocusCoordinator {
         onChange?()
     }
 
-    func requestSync(verify: Bool = true) {
-        if verify {
+    func requestSync(mode: TogglSyncMode = .pendingWork) {
+        if mode != .pendingWork {
             for period in snapshot.tracking.periods where period.sessionID == snapshot.session?.id && [.running, .synced].contains(period.sync) {
-                verifyIDs.insert(period.id)
+                if (mode == .currentSession || period.stop == nil) && !verifiedIDs.contains(period.id) {
+                    verifyIDs.insert(period.id)
+                }
             }
         }
         nextRetry = nil
@@ -241,6 +248,23 @@ final class FocusCoordinator {
     private func index(_ id: String) -> Int? { snapshot.tracking.periods.firstIndex { $0.id == id } }
     private func scope(account: Int64, organization: Int64? = nil) -> String {
         organization.map { "org:\(account):\($0)" } ?? "user:\(account)"
+    }
+
+    private func earliest(account: Int64, organization: Int64? = nil, urgent: Bool) -> Double {
+        let key = scope(account: account, organization: organization)
+        var budget = snapshot.tracking.budgets[key] ?? RequestBudget()
+        let result = budget.earliest(now: now(), urgent: urgent)
+        snapshot.tracking.budgets[key] = budget
+        return result
+    }
+
+    // Don't spend a user read if the subsequent organization write cannot run.
+    private func waitForWrite(_ id: String, account: Int64, organization: Int64?, urgent: Bool) -> Bool {
+        let until = max(earliest(account: account, urgent: urgent),
+                        earliest(account: account, organization: organization, urgent: urgent))
+        guard until > now() else { return false }
+        failed(id, error: .quota(until))
+        return true
     }
 
     // Reserve quota and persist the intent before allowing URLSession to send.
@@ -256,28 +280,42 @@ final class FocusCoordinator {
             completion(.failure(.quota(earliest)))
             return
         }
-        budget.attempts.append(now())
+        budget.reserve(now: now())
         snapshot.tracking.budgets[key] = budget
         beforeSend?()
         guard persist() else { busy = false; completion(.failure(.storage)); return }
         busy = true
-        client.request(method, path: path, account: account, token: token, body: body) { (result: Result<T, TogglError>) in
+        client.request(method, path: path, account: account, token: token, body: body) { (response: TogglResponse<T>) in
             self.busy = false
             var budget = self.snapshot.tracking.budgets[key] ?? RequestBudget()
+            budget.observe(response.metadata, now: self.now())
+            let result = response.result
             switch result {
             case .success:
                 budget.failures = 0
-                budget.blockedUntil = 0
+                self.nextRetry = nil
+                if budget.blockedUntil <= self.now() { budget.blockedUntil = 0 }
             case .failure(let error):
                 budget.failures += 1
                 let delay = min(300.0, pow(2.0, Double(min(8, budget.failures))))
                 switch error {
-                case .http(402, let retry): budget.blockedUntil = self.now() + max(3600, retry ?? 0)
-                case .http(429, let retry): budget.blockedUntil = self.now() + max(delay, retry ?? 60)
+                case .http(402, let retry):
+                    let waits = [response.metadata.quotaResetsIn, response.metadata.retryAfter, retry].compactMap { $0 }
+                    let until = self.now() + max(1, waits.max() ?? 3600)
+                    budget.blockedUntil = max(budget.blockedUntil, until)
+                    budget.serverRemaining = 0
+                    budget.serverResetAt = until
+                case .http(429, let retry):
+                    budget.blockedUntil = max(budget.blockedUntil, self.now() + max(delay, response.metadata.retryAfter ?? retry ?? 60))
                 default: if !error.needsAction { budget.blockedUntil = self.now() + delay }
                 }
+                if !error.needsAction { self.nextRetry = budget.earliest(now: self.now(), urgent: urgent) }
             }
             self.snapshot.tracking.budgets[key] = budget
+            // Persist observations even if a caller cannot finish (for example,
+            // Keychain save fails). Preserve the actual result of remote writes;
+            // replacing it with a storage error could cause duplicate creation.
+            _ = self.persist()
             completion(result)
         }
     }
@@ -291,6 +329,7 @@ final class FocusCoordinator {
             ?? periods.first { $0.sync == .pending }
             ?? periods.first { verifyIDs.contains($0.id) && [.running, .synced].contains($0.sync) }
         guard let period = target, let account = period.accountID, period.workspaceID != nil else {
+            verifiedIDs.removeAll()
             snapshot.tracking.message = nil
             onChange?()
             return
@@ -298,6 +337,7 @@ final class FocusCoordinator {
         if [.uncertain, .creating].contains(period.sync) { reconcile(period, account: account); return }
         if period.remote != nil { verify(period, account: account); return }
         if period.stop != nil { create(period, account: account); return }
+        if waitForWrite(period.id, account: account, organization: period.organizationID ?? period.workspaceID, urgent: false) { return }
         send("GET", path: "/me/time_entries/current", account: account) { (result: Result<TogglEntry?, TogglError>) in
             guard let index = self.index(period.id) else { return }
             guard self.snapshot.tracking.periods[index].sync == .pending else { self.finish(); return }
@@ -343,11 +383,14 @@ final class FocusCoordinator {
 
     private func verify(_ period: WorkPeriod, account: Int64) {
         guard let remote = period.remote else { return }
-        send("GET", path: "/me/time_entries/\(remote.id)", account: account, urgent: period.stop != nil) { (result: Result<TogglEntry, TogglError>) in
+        let stopping = period.stop != nil && period.hasAutomaticWork
+        if stopping && waitForWrite(period.id, account: account, organization: period.organizationID ?? period.workspaceID, urgent: true) { return }
+        send("GET", path: "/me/time_entries/\(remote.id)", account: account, urgent: stopping) { (result: Result<TogglEntry, TogglError>) in
             guard let index = self.index(period.id) else { return }
             switch result {
             case .success(let entry):
                 self.verifyIDs.remove(period.id)
+                self.verifiedIDs.insert(period.id)
                 let latest = self.snapshot.tracking.periods[index]
                 if latest.stop != nil && latest.agreesWithLocal(entry) {
                     self.snapshot.tracking.periods[index].remote = entry
@@ -405,8 +448,17 @@ final class FocusCoordinator {
     private func failed(_ id: String, error: TogglError) {
         snapshot.tracking.message = error.message
         if error.needsAction { markReview(id, error.message); return }
-        nextRetry = snapshot.tracking.budgets.values.map(\.blockedUntil).filter { $0 > now() }.min() ?? now() + 5
+        nextRetry = nextRetry ?? now() + 5
         if case .quota(let until) = error { nextRetry = until }
+        if let takeover = snapshot.tracking.takeover, takeover.issue == nil {
+            nextRetry = max(nextRetry ?? now(),
+                earliest(account: takeover.accountID, urgent: true),
+                earliest(account: takeover.accountID, organization: takeover.organizationID ?? takeover.entry.workspace_id, urgent: true))
+        } else if let period = snapshot.tracking.periods.first(where: { $0.id == id }),
+                  period.hasAutomaticWork, period.stop != nil, period.remote != nil, let account = period.accountID {
+            nextRetry = max(nextRetry ?? now(), earliest(account: account, urgent: true),
+                earliest(account: account, organization: period.organizationID ?? period.workspaceID, urgent: true))
+        }
         _ = persist()
         onChange?()
     }
@@ -474,6 +526,8 @@ final class FocusCoordinator {
         finish()
     }
     private func performTakeover(_ takeover: TogglTakeover) {
+        if waitForWrite(takeover.periodID, account: takeover.accountID,
+                        organization: takeover.organizationID ?? takeover.entry.workspace_id, urgent: true) { return }
         send("GET", path: "/me/time_entries/\(takeover.entry.id)", account: takeover.accountID, urgent: true) { (result: Result<TogglEntry, TogglError>) in
             switch result {
             case .success(let entry):
@@ -543,7 +597,9 @@ final class FocusCoordinator {
 
     func connect(token: String?, refresh: Bool = false, completion: @escaping (Result<TogglProfile, TogglError>) -> Void) {
         guard !busy else { completion(.failure(.network(false))); return }
-        let account = snapshot.tracking.settings.accountID ?? 0
+        // A supplied token may belong to a different user. Do not move the old
+        // user's existing budget to that account when validating it.
+        let account = token == nil ? (snapshot.tracking.settings.accountID ?? 0) : 0
         send("GET", path: "/me?with_related_data=true", account: account, token: token) { (result: Result<TogglProfile, TogglError>) in
             switch result {
             case .success(let profile):
@@ -558,7 +614,7 @@ final class FocusCoordinator {
                     if account != profile.id, let budget = self.snapshot.tracking.budgets.removeValue(forKey: self.scope(account: account)) {
                         let key = self.scope(account: profile.id)
                         var existing = self.snapshot.tracking.budgets[key] ?? RequestBudget()
-                        existing.attempts += budget.attempts
+                        existing.merge(budget, now: self.now())
                         self.snapshot.tracking.budgets[key] = existing
                     }
                     guard self.persist() else { completion(.failure(.invalidResponse)); return }

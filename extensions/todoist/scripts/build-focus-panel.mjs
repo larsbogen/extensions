@@ -10,7 +10,7 @@ if (process.platform !== "darwin") {
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const source = join(project, "native", "focus-panel");
-const work = join(project, "work", "focus-panel-build");
+const work = resolve(project, process.env.FOCUS_PANEL_BUILD_DIR || "work/focus-panel-build");
 const assets = join(project, "assets", "focus-panel", "FocusPanel.app", "Contents");
 mkdirSync(work, { recursive: true });
 mkdirSync(join(assets, "MacOS"), { recursive: true });

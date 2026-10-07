@@ -114,8 +114,13 @@ signerte hjelpeappen er bygget på nytt. Tilgangsfeil vises i kortet.
   gir lokal kø. Når stopp ikke er bekreftet, opplyser kortet at den eksterne timeren
   kan fortsette. Stopp synkroniseres med det lagrede tidspunktet.
 - En annen aktiv timer krever et valg: **Bytt til fokusoppgaven** eller **Fortsett
-  uten Toggl**. Endringer gjort direkte i Toggl oppdages ved neste synkronisering;
-  kortet pauser og lar deg beholde Toggl-versjonen eller erstatte den med lokal tid.
+  uten Toggl**. Før stopp og oppdatering kontrolleres registreringen for eksterne
+  endringer. Kortet pauser ved konflikt og lar deg beholde Toggl-versjonen eller
+  erstatte den med lokal tid.
+- **Synkroniser** kontrollerer hele gjeldende fokusøkt, også ferdig synkroniserte
+  perioder. Automatiske handlinger behandler bare ventende arbeid; oppstart og
+  oppvåkning kontrollerer også aktiv periode. Historikken hentes ikke på nytt ved
+  hver pause eller gjenopptakelse. Det gjøres ingen periodisk polling.
 - Ved uklart opprettelsessvar vises **Se gjennom**. Kontroller kandidater i Toggl,
   og knytt eventuelt til en eksisterende registrering. Automatisk ny opprettelse
   forsøkes aldri etter et mulig gjennomført kall, heller ikke ved tomt oppslag.
@@ -138,13 +143,27 @@ uten å finne på historiske starttidspunkter eller sende den til Toggl. Ikke br
 eldre hjelpeapp mot migrerte fokusdata.
 
 Synkroniseringen bruker separate, vedvarende budsjetter for bruker- og
-organisasjonskall, mellomlagring og forsinkede nye forsøk. HTTP 402 og 429 stopper
-videre kall innen det aktuelle budsjettet. Andre integrasjoner kan bruke den samme
-Toggl-kvoten; lokale budsjetter garanterer derfor ikke at et stopp kan sendes straks.
+organisasjonskall, tilpasset gratiskvoten på 30 kall per time. Vanlige kall får bruke
+28 plasser; de siste to holdes av til nødvendige stopp og avklaringer. Fem vanlige
+arbeidsperioder med pause/gjenoppta bruker 10 brukerkall og 10 organisasjonskall,
+utenom tilkobling, manuell synkronisering og feil.
+
+Toggls headere for restkvote og tilbakestilling brukes sammen med det lokale
+budsjettet. Restkvote uten tilbakestillingstid beholdes konservativt i én time.
+HTTP 402 følger den lengste oppgitte ventetiden fra kvoteheaderen og `Retry-After`;
+én time brukes bare dersom begge mangler eller er ugyldige. HTTP 429 gir også
+utsatt nytt forsøk. `Retry-After` støtter sekunder og HTTP-dato. Lokale grenser kan
+kreve lengre venting, og manuell synkronisering omgår ikke disse grensene.
+
+Budsjetter og ventetider overlever omstart. Andre integrasjoner kan bruke den
+samme kvoten etter siste svar fra Toggl; verken serveropplysninger eller lokale
+budsjetter garanterer derfor at et stopp kan sendes straks. Stoppetiden beholdes
+lokalt slik at senere synkronisering ikke forlenger registrert arbeidstid.
 Rapporter, ukeoversikt, etikettkoblinger og fakturerbar tid inngår ikke.
 
 `npm run test:focus` bruker falsk klokke og simulerte Toggl-svar. Testene dekker
-blant annet nøyaktig aktiv tid, frakoblet arbeid, omstart, uklare svar, kvoter,
+blant annet nøyaktig aktiv tid, frakoblet arbeid, omstart, uklare svar, kallforbruk,
+kvoteheadere, stoppreserve, ventetider og manuell kontroll av historikk,
 eksterne endringer, kontobytte, lagringsfeil og migrering. `npm test` kontrollerer
 JSON-broen, samtidige Raycast-kommandoer og Todoist-fullføring. Automatiske tester
 bruker ingen ekte kontoer eller token.
@@ -152,6 +171,8 @@ bruker ingen ekte kontoer eller token.
 Bygging krever eksisterende Xcode Command Line Tools på macOS. `npm run build` og
 `npm run dev` bygger hjelpeappen først. Ved endring i Swift-koden mens den lokale
 utviklingstjenesten kjører, bruk `npm run build:focus`, lukk fokuskortet og åpne det igjen.
+Bygge- og testmappen kan overstyres med `FOCUS_PANEL_BUILD_DIR` (relativt til
+utvidelsen eller som absolutt sti); standarden er `work/focus-panel-build`.
 Hjelpeappen bygges for arkitekturen til maskinen du bruker; et distribuert bygg for
 andre Mac-arkitekturer må bygges der eller gjøres universelt før publisering.
 

@@ -14,7 +14,7 @@ extension FocusController {
     }
     @objc func syncToggl() {
         guard coordinator.persist() else { return }
-        coordinator.requestSync()
+        coordinator.requestSync(mode: .currentSession)
     }
     @objc func reviewToggl() {
         guard !coordinator.busy else { return }
