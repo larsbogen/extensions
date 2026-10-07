@@ -1,5 +1,10 @@
 # Todoist Changelog
 
+## Fix focus window task completion - {PR_MERGE_DATE}
+
+- Pass task and session IDs using Raycast's `context` deeplink parameter so the completion command receives them.
+- Enable the completion command by default so the focus card can launch it.
+
 ## Complete tasks from the focus window - {PR_MERGE_DATE}
 
 - Add “Fullfør oppgave” to complete the focused Todoist task, clear its focus, and close the timer.

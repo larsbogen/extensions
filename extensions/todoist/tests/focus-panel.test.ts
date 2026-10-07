@@ -30,6 +30,14 @@ describe("floating focus panel bridge", () => {
     await writeFile(join(directory, "state.json"), JSON.stringify({ requestId: request.id }));
   }
 
+  it("enables the completion command so Raycast can launch it from the card", async () => {
+    const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+    const command = manifest.commands.find((command: { name: string }) => command.name === "complete-focused-task");
+    expect(command).toBeDefined();
+    expect(command.mode).toBe("no-view");
+    expect(command.disabledByDefault).not.toBe(true);
+  });
+
   it("preserves long, multilingual titles and quotes through JSON without a shell", async () => {
     const launch = vi.fn(acknowledge);
     const client = createFocusPanelClient({ executable, directory, launch });

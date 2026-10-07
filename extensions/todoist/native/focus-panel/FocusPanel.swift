@@ -499,19 +499,12 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc func completeTask() {
         guard !isCompleting, let session = snapshot.session,
-              let string = session.task.completionURL,
-              var components = URLComponents(string: string),
-              components.scheme?.hasPrefix("raycast") == true else { return }
+              let url = session.completionDeeplink else { return }
         updateElapsed()
         snapshot.session?.pause()
         completionError = nil
         // Discard the previous failure before retrying this same idempotent completion.
         try? FileManager.default.removeItem(at: directory.appendingPathComponent("completion.json"))
-        let context = ["sessionId": session.id, "taskId": session.task.id]
-        guard let data = try? JSONEncoder().encode(context), let json = String(data: data, encoding: .utf8) else { return }
-        components.queryItems = (components.queryItems ?? []).filter { $0.name != "launchContext" }
-            + [URLQueryItem(name: "launchContext", value: json)]
-        guard let url = components.url else { return }
         isCompleting = true
         completionStarted = ProcessInfo.processInfo.systemUptime
         save()

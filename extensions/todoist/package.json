@@ -297,8 +297,7 @@
       "title": "Complete Focused Task",
       "subtitle": "Todoist",
       "description": "Fullfør oppgaven fra fokusvinduet og stopp fokusøkten.",
-      "mode": "no-view",
-      "disabledByDefault": true
+      "mode": "no-view"
     },
     {
       "name": "send-daily-plan",

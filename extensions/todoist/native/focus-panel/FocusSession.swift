@@ -42,6 +42,19 @@ struct FocusSession: Codable {
     var remaining: Double { max(0, duration - elapsed) }
     var progress: Double { duration > 0 ? min(1, elapsed / duration) : 0 }
 
+    var completionDeeplink: URL? {
+        guard let string = task.completionURL,
+              var components = URLComponents(string: string),
+              components.scheme?.hasPrefix("raycast") == true,
+              let data = try? JSONEncoder().encode(["sessionId": id, "taskId": task.id]),
+              let json = String(data: data, encoding: .utf8) else { return nil }
+        // Raycast's URL parameter is `context`; it becomes `launchContext` in LaunchProps.
+        components.queryItems = (components.queryItems ?? []).filter {
+            $0.name != "context" && $0.name != "launchContext"
+        } + [URLQueryItem(name: "context", value: json)]
+        return components.url
+    }
+
     mutating func advance(by seconds: Double) {
         guard phase == .running, seconds.isFinite, seconds > 0 else { return }
         elapsed += seconds

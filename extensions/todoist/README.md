@@ -76,6 +76,8 @@ Raycasts generelle utseende blir ikke endret.
 - **Fullfør oppgave** fullfører oppgaven i Todoist, fjerner fokuset og lukker kortet.
   Timeren står på pause mens fullføringen pågår. Ved feil kan du prøve igjen eller fortsette økten.
   For gjentakende oppgaver fullføres den aktuelle forekomsten, og fokusetiketten fjernes fra den neste.
+  Hvis kommandoen ble deaktivert av en tidligere versjon, aktiver **Complete Focused Task**
+  under **Raycast Settings → Todoist**. Godkjenn eventuell forespørsel fra Raycast om å kjøre kommandoen.
 - Lukkekrysset setter økten på pause. Bruk **Show Focus Window** i Raycast for å hente den
   frem igjen. Samme oppgave beholder timeren; en annen oppgave starter en ny økt.
   **Unfocus Task** stopper også kortet. Etter maskinhvile, skjermlås eller omstart må en

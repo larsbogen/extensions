@@ -39,6 +39,25 @@ struct SessionTests {
         assert(decoded.session?.task.title == task.title && decoded.appearance.fontSize == 42)
         assert(FocusSession(task: task, duration: -30).duration == 0)
         assert(FocusSession(task: task, duration: 90000).duration == 86400)
-        print("Focus session checks passed: pause, resume, expiry, extension, recovery, open-ended, bounds, persistence.")
+        assert(session.completionDeeplink == nil, "Old cards without a completion command cannot complete")
+        session.task.completionURL = "https://example.com/complete"
+        assert(session.completionDeeplink == nil, "Completion must open Raycast")
+        session.task.id = "task/æøå & + ? #"
+        session.task.completionURL = "raycast://extensions/doist/todoist/complete-focused-task?launchType=userInitiated&context=old&launchContext=old"
+        let link = session.completionDeeplink!
+        let components = URLComponents(url: link, resolvingAgainstBaseURL: false)!
+        assert(components.path == "/doist/todoist/complete-focused-task")
+        let query = components.queryItems!
+        assert(query.first(where: { $0.name == "launchType" })?.value == "userInitiated")
+        assert(!query.contains(where: { $0.name == "launchContext" }), "Raycast ignores the launchContext URL parameter")
+        let contexts = query.filter { $0.name == "context" }
+        assert(contexts.count == 1, "Retries replace the context instead of appending duplicate values")
+        let context = try JSONDecoder().decode([String: String].self, from: Data(contexts[0].value!.utf8))
+        assert(context == ["sessionId": session.id, "taskId": session.task.id], "Raycast must receive the exact session and task IDs")
+        let retry = URLComponents(url: session.completionDeeplink!, resolvingAgainstBaseURL: false)!
+        let retryJSON = retry.queryItems!.first(where: { $0.name == "context" })!.value!
+        let retryContext = try JSONDecoder().decode([String: String].self, from: Data(retryJSON.utf8))
+        assert(retryContext == context, "Retries reuse the same idempotent session ID")
+        print("Focus session checks passed: pause, resume, expiry, extension, recovery, open-ended, bounds, persistence, completion deeplink.")
     }
 }
