@@ -240,9 +240,19 @@ Todoist-tillegget i Outlook eller Microsoft Graph-tilgang.
 4. Kontroller tittel og beskrivelse, velg eventuelt prosjekt/dato, og bruk
    **Create Task** for å lagre.
 
-Knytt en hurtigtast til kommandoen under **Raycast Settings → Extensions →
-Todoist → Create Task from Outlook**. Raycast trenger macOS-tillatelse til
-tilgjengelighet og til å bruke System Events hvis systemet ber om det.
+Hurtigtaster satt i Raycast er globale. For å bruke **⌘T bare i Outlook**, legg
+snarveien under **Microsoft Outlook → Keyboard Shortcuts** i BetterTouchTool,
+med handlingen **Execute Shell Script / Task** og dette skriptet:
+
+```sh
+/usr/bin/open -g 'raycast://extensions/doist/todoist/create-task-from-outlook?launchType=background'
+```
+
+Fjern eventuell global ⌘T-binding i Raycast. Bakgrunnsstarten lar Outlook beholde
+fokus mens teksten leses; oppgaveskjemaet åpnes deretter. Kommandoen lukker
+Outlooks «Forklar dette»-popup hvis den har tatt fokus fra tekstmarkeringen,
+uten å fjerne markeringen. Raycast trenger macOS-tillatelse til tilgjengelighet
+og til å bruke System Events hvis systemet ber om det.
 
 Emnet fylles inn som tittel. Beskrivelsen inneholder avsenderens navn og
 e-postadresse, etterfulgt av akkurat det markerte utdraget. Avsenderen gjelder

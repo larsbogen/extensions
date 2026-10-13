@@ -79,6 +79,22 @@ describe("Outlook selection capture", () => {
     await expect(captureOutlookSelection()).rejects.toThrow("e-postteksten");
   });
 
+  it.each([null, "AXButton"])("rejects missing or unexpected focus (%s)", async (focusedRole) => {
+    mocks.script.mockResolvedValue(JSON.stringify({ ...header, focusedRole }));
+    await expect(captureOutlookSelection()).rejects.toThrow("e-postteksten");
+    expect(mocks.selected).not.toHaveBeenCalled();
+  });
+
+  it("rejects focus moving out of the message while reading the selection", async () => {
+    mocks.script.mockResolvedValueOnce(JSON.stringify(header));
+    mocks.script.mockResolvedValueOnce(JSON.stringify({ ...header, focusedRole: "AXTextField" }));
+    await Command();
+    expect(mocks.launch).not.toHaveBeenCalled();
+    expect(mocks.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("e-postteksten") }),
+    );
+  });
+
   it.each(["", " \n\t "])("does not create a draft from empty selected text", async (text) => {
     mocks.selected.mockResolvedValue(text);
     await Command();
@@ -126,14 +142,24 @@ type AXNode = ReturnType<typeof node>;
 function node(attributes: Record<string, unknown>, descendants: AXNode[] = []) {
   return {
     attributes: { byName: (name: string) => ({ value: () => attributes[name] ?? null }) },
-    uiElements: () => descendants,
+    uiElements: () => [...descendants],
   };
 }
-function runHeaderScript(windows: AXNode[]) {
-  const focused = node({ AXRole: "AXWebArea", AXDescription: "Reading Pane" });
-  const process = { ...node({ AXFocusedUIElement: focused }), windows: () => windows };
+function runHeaderScript(
+  windows: AXNode[],
+  options: { focused?: AXNode; frontmost?: boolean; keyCode?: (key: number) => void } = {},
+) {
+  const readingPane = node({ AXRole: "AXWebArea", AXDescription: "Reading Pane" });
+  const attributes = { AXFocusedUIElement: options.focused ?? readingPane };
+  const process = { ...node(attributes), windows: () => windows, frontmost: () => options.frontmost ?? true };
   return runInNewContext(`${outlookHeaderScript}\nrun()`, {
-    Application: () => ({ processes: { byName: () => process } }),
+    Application: () => ({
+      processes: { byName: () => process },
+      keyCode: (key: number) => {
+        options.keyCode?.(key);
+        attributes.AXFocusedUIElement = readingPane;
+      },
+    }),
   });
 }
 
@@ -147,6 +173,38 @@ describe("Outlook header traversal", () => {
       node({ AXIdentifier: "messageHeaderRecipientsContent", AXValue: "Another Person <other@example.org>" }),
     ]),
   ]);
+  const messageWindow = node({ AXRole: "AXWindow", AXSubrole: "AXStandardWindow" }, [messageHeader]);
+
+  it("closes the focused Outlook selection popover before checking the reading pane", () => {
+    const keyCode = vi.fn();
+    const result = JSON.parse(
+      runHeaderScript([messageWindow], {
+        focused: node({
+          AXRole: "AXButton",
+          AXIdentifier: "WKWebviewAskCopilotButton",
+          AXDescription: "Forklar dette",
+        }),
+        keyCode,
+      }),
+    );
+    expect(keyCode).toHaveBeenCalledExactlyOnceWith(53);
+    expect(result).toEqual(header);
+  });
+
+  it.each([
+    { role: "AXButton", identifier: "WKWebviewAskCopilotButton", frontmost: false },
+    { role: "AXButton", identifier: "OtherButton", frontmost: true },
+    { role: "AXTextField", identifier: "WKWebviewAskCopilotButton", frontmost: true },
+    { role: null, identifier: null, frontmost: true },
+  ])("does not send Escape for an unrelated focus or a background app: %j", ({ role, identifier, frontmost }) => {
+    const keyCode = vi.fn();
+    runHeaderScript([messageWindow], {
+      focused: node({ AXRole: role, AXIdentifier: identifier }),
+      frontmost,
+      keyCode,
+    });
+    expect(keyCode).not.toHaveBeenCalled();
+  });
   it("ignores the selection popover, folder list and body, and reads the sender from the visible header", () => {
     const folderList = node({ AXRole: "AXOutline" });
     folderList.uiElements = () => {

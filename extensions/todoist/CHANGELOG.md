@@ -1,5 +1,10 @@
 # Todoist Changelog
 
+## Fix Outlook selection focus - {PR_MERGE_DATE}
+
+- Dismiss Outlook's focused "Explain this" selection popover without clearing the selected excerpt.
+- Recheck message focus after capture and document an Outlook-only BetterTouchTool shortcut that preserves foreground focus.
+
 ## Create tasks from selected Outlook text - {PR_MERGE_DATE}
 
 - Add a macOS command that opens the task form with the Outlook subject, sender, and selected email excerpt.

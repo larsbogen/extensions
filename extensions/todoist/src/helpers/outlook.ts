@@ -5,12 +5,22 @@ import { runAppleScript } from "@raycast/utils";
 // recipients for a fallback sender, and do not read the message body here.
 export const outlookHeaderScript = `
 function run() {
-  const outlook = Application("System Events").processes.byName("Microsoft Outlook");
+  const systemEvents = Application("System Events");
+  const outlook = systemEvents.processes.byName("Microsoft Outlook");
   function attr(element, name) {
     try { return element.attributes.byName(name).value(); } catch (_) { return null; }
   }
   function children(element) {
     try { return element.uiElements(); } catch (_) { return []; }
+  }
+  // Outlook moves focus into its "Explain this" button when selecting text.
+  // Escape closes that popover while preserving the selection. Never send it
+  // to another app, an ordinary Outlook button, or an unknown focused element.
+  const selectionFocus = attr(outlook, "AXFocusedUIElement");
+  if (attr(selectionFocus, "AXRole") === "AXButton" &&
+      attr(selectionFocus, "AXIdentifier") === "WKWebviewAskCopilotButton" &&
+      outlook.frontmost()) {
+    systemEvents.keyCode(53);
   }
   // A selection can put Outlook's small "Explain this" popover first in
   // windows(). Use the front standard window, not that floating button.
@@ -101,6 +111,9 @@ export async function captureOutlookSelection(): Promise<OutlookTaskDraft> {
   const text = await getSelectedText();
   if (!text.trim()) throw new Error("Marker tekst i e-posten først.");
   const after = await readOutlookHeader();
+  if (after.focusedRole !== "AXWebArea" || after.focusedDescription !== "Reading Pane") {
+    throw new Error("Klikk i e-postteksten og marker utdraget du vil bruke.");
+  }
   if (before.subject !== after.subject || before.sender !== after.sender || before.timestamp !== after.timestamp) {
     throw new Error("Meldingen ble endret under lesingen. Marker teksten og prøv igjen.");
   }
