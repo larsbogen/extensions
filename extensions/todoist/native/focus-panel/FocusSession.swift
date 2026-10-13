@@ -121,6 +121,16 @@ struct FocusSnapshot: Codable {
         self.appearance = appearance
     }
 
+    mutating func acknowledge(_ id: String) {
+        // v1 stored only requestId. Keep that receipt when the first queued
+        // command replaces it, so a leftover request.json cannot replay it.
+        for receipt in [requestId, id] where !receipt.isEmpty && !acknowledgedRequests.contains(receipt) {
+            acknowledgedRequests.append(receipt)
+        }
+        acknowledgedRequests = Array(acknowledgedRequests.suffix(256))
+        requestId = id
+    }
+
     enum CodingKeys: String, CodingKey { case version, session, appearance, requestId, updatedAt, tracking, acknowledgedRequests }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -134,6 +144,7 @@ struct FocusSnapshot: Codable {
         updatedAt = try values.decodeIfPresent(Double.self, forKey: .updatedAt) ?? 0
         tracking = try values.decodeIfPresent(TrackingState.self, forKey: .tracking) ?? TrackingState()
         acknowledgedRequests = try values.decodeIfPresent([String].self, forKey: .acknowledgedRequests) ?? []
+        acknowledge(requestId)
         // v1 elapsed time has no reliable wall-clock history and is never uploaded.
         self.version = 2
     }

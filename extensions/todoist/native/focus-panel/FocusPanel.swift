@@ -76,7 +76,6 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var ticker: Timer?
     var previousTick = ProcessInfo.processInfo.systemUptime
     var lastSave = ProcessInfo.processInfo.systemUptime
-    var requestData: Data?
     var isLayingOut = false
     var lastTitleWidth: CGFloat = 0
     var isCompleting = false
@@ -487,27 +486,13 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func consumeRequest() {
         isProcessingRequests = true
         defer { isProcessingRequests = false; finishBackgroundIfPossible() }
-        let inbox = directory.appendingPathComponent("requests")
-        let queued = ((try? FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
-        for file in queued {
-            guard let data = try? Data(contentsOf: file), let request = try? JSONDecoder().decode(FocusRequest.self, from: data) else { continue }
-            if handleRequest(request) { try? FileManager.default.removeItem(at: file) }
-        }
-        // Read the previous single-file protocol for older clients and local previews.
-        if let data = try? Data(contentsOf: directory.appendingPathComponent("request.json")), data != requestData,
-           let request = try? JSONDecoder().decode(FocusRequest.self, from: data), handleRequest(request) {
-            requestData = data
-            try? FileManager.default.removeItem(at: directory.appendingPathComponent("request.json"))
-        }
+        FocusRequestInbox(directory: directory).consume(handleRequest)
     }
 
     func acknowledge(_ request: FocusRequest) -> Bool {
         let previousID = snapshot.requestId
         let previousAcknowledgements = snapshot.acknowledgedRequests
-        snapshot.requestId = request.id
-        snapshot.acknowledgedRequests.append(request.id)
-        snapshot.acknowledgedRequests = Array(snapshot.acknowledgedRequests.suffix(256))
+        snapshot.acknowledge(request.id)
         if coordinator.persist() { return true }
         snapshot.requestId = previousID
         snapshot.acknowledgedRequests = previousAcknowledgements

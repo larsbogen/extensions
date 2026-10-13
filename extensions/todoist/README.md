@@ -168,6 +168,11 @@ eksterne endringer, kontobytte, lagringsfeil og migrering. `npm test` kontroller
 JSON-broen, samtidige Raycast-kommandoer og Todoist-fullføring. Automatiske tester
 bruker ingen ekte kontoer eller token.
 
+Ved oppgradering husker hjelpeappen også kvitteringen fra det gamle meldingsformatet.
+En gammel `request.json` kan dermed ikke hente tilbake en tidligere fokusoppgave
+etter at en ny er valgt. Nye kømeldinger går foran gamle meldinger, og en mislykket
+lagring stanser behandlingen til meldingen kan lagres.
+
 Bygging krever eksisterende Xcode Command Line Tools på macOS. `npm run build` og
 `npm run dev` bygger hjelpeappen først. Ved endring i Swift-koden mens den lokale
 utviklingstjenesten kjører, bruk `npm run build:focus`, lukk fokuskortet og åpne det igjen.
