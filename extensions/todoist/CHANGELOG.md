@@ -1,5 +1,11 @@
 # Todoist Changelog
 
+## Avoid hanging Outlook selection reads - {PR_MERGE_DATE}
+
+- Read focus and selected text directly through macOS Accessibility to avoid System Events recursing on Outlook's selection popover. Preserve the selection without sending Escape or changing focus.
+- Verify that the selected text still belongs to the same message before opening the task form.
+- Show errors in a HUD for background launches and explain timeouts without exposing script details.
+
 ## Fix Outlook selection focus - {PR_MERGE_DATE}
 
 - Dismiss Outlook's focused "Explain this" selection popover without clearing the selected excerpt.

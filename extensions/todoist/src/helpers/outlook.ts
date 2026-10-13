@@ -5,6 +5,57 @@ import { runAppleScript } from "@raycast/utils";
 // recipients for a fallback sender, and do not read the message body here.
 export const outlookHeaderScript = `
 function run() {
+  // System Events can recurse indefinitely when turning Outlook's focused
+  // popover into an Apple-event object reference. Keep that element native and
+  // only return scalar focus properties; the message header still uses JXA.
+  ObjC.import("AppKit");
+  ObjC.import("ApplicationServices");
+  ObjC.bindFunction("AXUIElementCreateApplication", ["id", ["int"]]);
+  ObjC.bindFunction("AXUIElementCopyAttributeValue", ["int", ["id", "id", "id*"]]);
+  ObjC.bindFunction("AXUIElementCopyParameterizedAttributeValue", ["int", ["id", "id", "id", "id*"]]);
+  ObjC.bindFunction("AXUIElementSetMessagingTimeout", ["int", ["id", "float"]]);
+  const runningOutlook = $.NSRunningApplication.runningApplicationsWithBundleIdentifier("com.microsoft.Outlook").firstObject;
+  const nativeOutlook = $.AXUIElementCreateApplication(runningOutlook.processIdentifier);
+  function nativeAttr(element, name) {
+    if (!element) return null;
+    $.AXUIElementSetMessagingTimeout(element, 2);
+    const result = Ref();
+    if ($.AXUIElementCopyAttributeValue(element, $(name), result) !== 0) return null;
+    return result[0];
+  }
+  function focusInfo() {
+    const focused = nativeAttr(nativeOutlook, "AXFocusedUIElement");
+    return {
+      role: ObjC.unwrap(nativeAttr(focused, "AXRole")),
+      identifier: ObjC.unwrap(nativeAttr(focused, "AXIdentifier")),
+      description: ObjC.unwrap(nativeAttr(focused, "AXDescription"))
+    };
+  }
+  function readSelection() {
+    const windows = ObjC.unwrap(nativeAttr(nativeOutlook, "AXWindows")) || [];
+    const window = windows.find(element => ObjC.unwrap(nativeAttr(element, "AXSubrole")) === "AXStandardWindow");
+    const queue = window ? [window] : [];
+    let visited = 0;
+    while (queue.length && visited++ < 250) {
+      const element = queue.shift();
+      const role = ObjC.unwrap(nativeAttr(element, "AXRole"));
+      if (role === "AXWebArea" && ObjC.unwrap(nativeAttr(element, "AXDescription")) === "Reading Pane") {
+        const selected = ObjC.unwrap(nativeAttr(element, "AXSelectedText"));
+        if (typeof selected === "string") return selected;
+        const range = nativeAttr(element, "AXSelectedTextMarkerRange");
+        const result = Ref();
+        if (range && $.AXUIElementCopyParameterizedAttributeValue(element, $("AXStringForTextMarkerRange"), range, result) === 0) {
+          const text = ObjC.unwrap(result[0]);
+          if (typeof text === "string") return text;
+        }
+        return null;
+      }
+      if (["AXWindow", "AXGroup", "AXSplitGroup", "AXScrollArea"].includes(role)) {
+        queue.push(...(ObjC.unwrap(nativeAttr(element, "AXChildren")) || []));
+      }
+    }
+    return null;
+  }
   const systemEvents = Application("System Events");
   const outlook = systemEvents.processes.byName("Microsoft Outlook");
   function attr(element, name) {
@@ -13,15 +64,15 @@ function run() {
   function children(element) {
     try { return element.uiElements(); } catch (_) { return []; }
   }
-  // Outlook moves focus into its "Explain this" button when selecting text.
-  // Escape closes that popover while preserving the selection. Never send it
-  // to another app, an ordinary Outlook button, or an unknown focused element.
-  const selectionFocus = attr(outlook, "AXFocusedUIElement");
-  if (attr(selectionFocus, "AXRole") === "AXButton" &&
-      attr(selectionFocus, "AXIdentifier") === "WKWebviewAskCopilotButton" &&
-      outlook.frontmost()) {
-    systemEvents.keyCode(53);
+  // Read the selection in place. Outlook may focus its "Explain this" button;
+  // Escape or changing focus can clear the selection or deselect the message.
+  const selectionFocus = focusInfo();
+  if (!runningOutlook.active) throw new Error("Åpne Outlook og marker tekst i e-posten først.");
+  if (!(selectionFocus.role === "AXWebArea" && selectionFocus.description === "Reading Pane") &&
+      !(selectionFocus.role === "AXButton" && selectionFocus.identifier === "WKWebviewAskCopilotButton")) {
+    throw new Error("Klikk i e-postteksten og marker utdraget du vil bruke.");
   }
+  const selectedText = readSelection();
   // A selection can put Outlook's small "Explain this" popover first in
   // windows(). Use the front standard window, not that floating button.
   const windows = outlook.windows().filter(element => attr(element, "AXSubrole") === "AXStandardWindow");
@@ -59,8 +110,8 @@ function run() {
     if (attr(element, "AXIdentifier") === "messageHeaderTimeStampContent") timestamp = attr(element, "AXValue");
     headerQueue.push(...children(element));
   }
-  const focused = attr(outlook, "AXFocusedUIElement");
-  return JSON.stringify({ subject, sender, senderName, timestamp, focusedRole: attr(focused, "AXRole"), focusedDescription: attr(focused, "AXDescription") });
+  const focused = focusInfo();
+  return JSON.stringify({ subject, sender, senderName, timestamp, selectedText, focusedRole: focused.role, focusedDescription: focused.description, focusedIdentifier: focused.identifier });
 }
 `;
 
@@ -71,6 +122,8 @@ export type OutlookHeader = {
   timestamp?: string;
   focusedRole?: string;
   focusedDescription?: string;
+  focusedIdentifier?: string;
+  selectedText?: string | null;
 };
 
 export type OutlookTaskDraft = { content: string; description: string };
@@ -105,17 +158,27 @@ export async function captureOutlookSelection(): Promise<OutlookTaskDraft> {
   const app = await getFrontmostApplication();
   if (app.bundleId !== "com.microsoft.Outlook") throw new Error("Åpne Outlook og marker tekst i e-posten først.");
   const before = await readOutlookHeader();
-  if (before.focusedRole !== "AXWebArea" || before.focusedDescription !== "Reading Pane") {
+  if (!hasMessageFocus(before)) {
     throw new Error("Klikk i e-postteksten og marker utdraget du vil bruke.");
   }
-  const text = await getSelectedText();
+  const text = before.selectedText ?? (await getSelectedText());
   if (!text.trim()) throw new Error("Marker tekst i e-posten først.");
   const after = await readOutlookHeader();
-  if (after.focusedRole !== "AXWebArea" || after.focusedDescription !== "Reading Pane") {
+  if (!hasMessageFocus(after)) {
     throw new Error("Klikk i e-postteksten og marker utdraget du vil bruke.");
   }
   if (before.subject !== after.subject || before.sender !== after.sender || before.timestamp !== after.timestamp) {
     throw new Error("Meldingen ble endret under lesingen. Marker teksten og prøv igjen.");
   }
+  if (typeof after.selectedText === "string" && after.selectedText.trim() !== text.trim()) {
+    throw new Error("Markeringen ble endret under lesingen. Marker teksten og prøv igjen.");
+  }
   return createOutlookDraft(after, text);
+}
+
+function hasMessageFocus(header: OutlookHeader): boolean {
+  return (
+    (header.focusedRole === "AXWebArea" && header.focusedDescription === "Reading Pane") ||
+    (header.focusedRole === "AXButton" && header.focusedIdentifier === "WKWebviewAskCopilotButton")
+  );
 }

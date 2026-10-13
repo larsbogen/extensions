@@ -6,15 +6,14 @@ const mocks = vi.hoisted(() => ({
   selected: vi.fn(),
   script: vi.fn(),
   launch: vi.fn(),
-  toast: vi.fn(),
+  hud: vi.fn(),
 }));
 vi.mock("@raycast/api", () => ({
   getFrontmostApplication: mocks.app,
   getSelectedText: mocks.selected,
   launchCommand: mocks.launch,
   LaunchType: { UserInitiated: "userInitiated" },
-  showToast: mocks.toast,
-  Toast: { Style: { Failure: "failure" } },
+  showHUD: mocks.hud,
 }));
 vi.mock("@raycast/utils", () => ({ runAppleScript: mocks.script }));
 
@@ -56,7 +55,7 @@ describe("Outlook selection capture", () => {
       },
     });
     expect(mocks.selected).toHaveBeenCalledOnce();
-    expect(mocks.toast).not.toHaveBeenCalled();
+    expect(mocks.hud).not.toHaveBeenCalled();
   });
 
   it("refuses another app before reading any selection or Outlook header", async () => {
@@ -65,7 +64,41 @@ describe("Outlook selection capture", () => {
     expect(mocks.selected).not.toHaveBeenCalled();
     expect(mocks.script).not.toHaveBeenCalled();
     expect(mocks.launch).not.toHaveBeenCalled();
-    expect(mocks.toast).toHaveBeenCalledOnce();
+    expect(mocks.hud).toHaveBeenCalledOnce();
+  });
+
+  it("uses the reading pane selection while Outlook's selection popup has focus", async () => {
+    mocks.script.mockResolvedValue(
+      JSON.stringify({
+        ...header,
+        focusedRole: "AXButton",
+        focusedIdentifier: "WKWebviewAskCopilotButton",
+        focusedDescription: "Forklar dette",
+        selectedText: "Only the native selection",
+      }),
+    );
+    await Command();
+    expect(mocks.selected).not.toHaveBeenCalled();
+    expect(mocks.launch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: {
+          outlookDraft: createOutlookDraft(header, "Only the native selection"),
+        },
+      }),
+    );
+  });
+
+  it("does not replace a known empty native selection with another source", async () => {
+    mocks.script.mockResolvedValue(JSON.stringify({ ...header, selectedText: "" }));
+    await Command();
+    expect(mocks.selected).not.toHaveBeenCalled();
+    expect(mocks.launch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a changed native selection in the same email", async () => {
+    mocks.script.mockResolvedValueOnce(JSON.stringify({ ...header, selectedText: "First selection" }));
+    mocks.script.mockResolvedValueOnce(JSON.stringify({ ...header, selectedText: "Changed selection" }));
+    await expect(captureOutlookSelection()).rejects.toThrow("Markeringen ble endret");
   });
 
   it("rejects selection in Outlook's search field", async () => {
@@ -90,25 +123,28 @@ describe("Outlook selection capture", () => {
     mocks.script.mockResolvedValueOnce(JSON.stringify({ ...header, focusedRole: "AXTextField" }));
     await Command();
     expect(mocks.launch).not.toHaveBeenCalled();
-    expect(mocks.toast).toHaveBeenCalledWith(
-      expect.objectContaining({ message: expect.stringContaining("e-postteksten") }),
-    );
+    expect(mocks.hud).toHaveBeenCalledWith(expect.stringContaining("e-postteksten"));
   });
 
   it.each(["", " \n\t "])("does not create a draft from empty selected text", async (text) => {
     mocks.selected.mockResolvedValue(text);
     await Command();
     expect(mocks.launch).not.toHaveBeenCalled();
-    expect(mocks.toast).toHaveBeenCalledOnce();
+    expect(mocks.hud).toHaveBeenCalledOnce();
   });
 
   it("does not fall back to stale clipboard contents if reading the selection fails", async () => {
     mocks.selected.mockRejectedValue(new Error("Unable to get selected text from frontmost application"));
     await Command();
     expect(mocks.launch).not.toHaveBeenCalled();
-    expect(mocks.toast).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "Marker tekst i e-posten og prøv igjen." }),
-    );
+    expect(mocks.hud).toHaveBeenCalledWith("Kunne ikke hente fra Outlook: Marker tekst i e-posten og prøv igjen.");
+  });
+
+  it("shows a concise timeout in a HUD instead of the unavailable background Toast API", async () => {
+    mocks.script.mockRejectedValue(new Error("Command timed out after undefined milliseconds: osascript"));
+    await Command();
+    expect(mocks.launch).not.toHaveBeenCalled();
+    expect(mocks.hud).toHaveBeenCalledWith("Kunne ikke hente fra Outlook: Outlook svarte ikke i tide. Prøv igjen.");
   });
 
   it("rejects a changed message even if its subject stays the same", async () => {
@@ -147,18 +183,45 @@ function node(attributes: Record<string, unknown>, descendants: AXNode[] = []) {
 }
 function runHeaderScript(
   windows: AXNode[],
-  options: { focused?: AXNode; frontmost?: boolean; keyCode?: (key: number) => void } = {},
+  options: { focused?: AXNode; frontmost?: boolean; nativeError?: string } = {},
 ) {
   const readingPane = node({ AXRole: "AXWebArea", AXDescription: "Reading Pane" });
-  const attributes = { AXFocusedUIElement: options.focused ?? readingPane };
-  const process = { ...node(attributes), windows: () => windows, frontmost: () => options.frontmost ?? true };
+  const nativeApplication = node({ AXFocusedUIElement: options.focused ?? readingPane, AXWindows: windows });
+  // Returning the focused element through System Events is the live failure.
+  const process = { windows: () => windows, frontmost: () => options.frontmost ?? true };
+  const nativeAPI = Object.assign((value: unknown) => value, {
+    NSRunningApplication: {
+      runningApplicationsWithBundleIdentifier: (bundleId: string) => {
+        expect(bundleId).toBe("com.microsoft.Outlook");
+        return { firstObject: { processIdentifier: 123, active: options.frontmost ?? true } };
+      },
+    },
+    AXUIElementCreateApplication: (pid: number) => {
+      expect(pid).toBe(123);
+      return nativeApplication;
+    },
+    AXUIElementSetMessagingTimeout: (_element: AXNode, seconds: number) => {
+      expect(seconds).toBe(2);
+      return 0;
+    },
+    AXUIElementCopyAttributeValue: (element: AXNode, name: string, result: unknown[]) => {
+      if (name === options.nativeError) return -25204;
+      result[0] = name === "AXChildren" ? element.uiElements() : element.attributes.byName(name).value();
+      return 0;
+    },
+    AXUIElementCopyParameterizedAttributeValue: (element: AXNode, name: string, range: unknown, result: unknown[]) => {
+      expect(name).toBe("AXStringForTextMarkerRange");
+      expect(range).toBe(element.attributes.byName("AXSelectedTextMarkerRange").value());
+      result[0] = element.attributes.byName("selectedMarkerText").value();
+      return 0;
+    },
+  });
   return runInNewContext(`${outlookHeaderScript}\nrun()`, {
+    ObjC: { import: () => {}, bindFunction: () => {}, unwrap: (value: unknown) => value },
+    Ref: () => [],
+    $: nativeAPI,
     Application: () => ({
       processes: { byName: () => process },
-      keyCode: (key: number) => {
-        options.keyCode?.(key);
-        attributes.AXFocusedUIElement = readingPane;
-      },
     }),
   });
 }
@@ -173,10 +236,19 @@ describe("Outlook header traversal", () => {
       node({ AXIdentifier: "messageHeaderRecipientsContent", AXValue: "Another Person <other@example.org>" }),
     ]),
   ]);
-  const messageWindow = node({ AXRole: "AXWindow", AXSubrole: "AXStandardWindow" }, [messageHeader]);
+  const selectedPane = node({ AXRole: "AXWebArea", AXDescription: "Reading Pane", AXSelectedText: "Selected excerpt" });
+  const messageWindow = node({ AXRole: "AXWindow", AXSubrole: "AXStandardWindow" }, [messageHeader, selectedPane]);
+  const capturedHeader = { ...header, selectedText: "Selected excerpt", focusedIdentifier: null };
 
-  it("closes the focused Outlook selection popover before checking the reading pane", () => {
-    const keyCode = vi.fn();
+  it("reads only scalar focus properties without requesting an element reference from System Events", () => {
+    expect(JSON.parse(runHeaderScript([messageWindow]))).toEqual(capturedHeader);
+  });
+
+  it.each(["AXFocusedUIElement", "AXRole"])("fails closed when native focus reading fails at %s", (nativeError) => {
+    expect(() => runHeaderScript([messageWindow], { nativeError })).toThrow("e-postteksten");
+  });
+
+  it("reads the selected excerpt without pressing Escape or changing the popup focus", () => {
     const result = JSON.parse(
       runHeaderScript([messageWindow], {
         focused: node({
@@ -184,11 +256,28 @@ describe("Outlook header traversal", () => {
           AXIdentifier: "WKWebviewAskCopilotButton",
           AXDescription: "Forklar dette",
         }),
-        keyCode,
       }),
     );
-    expect(keyCode).toHaveBeenCalledExactlyOnceWith(53);
-    expect(result).toEqual(header);
+    expect(result).toEqual({
+      ...capturedHeader,
+      focusedRole: "AXButton",
+      focusedIdentifier: "WKWebviewAskCopilotButton",
+      focusedDescription: "Forklar dette",
+    });
+  });
+
+  it("uses WebKit's selected text marker range when AXSelectedText is unavailable", () => {
+    const markerPane = node({
+      AXRole: "AXWebArea",
+      AXDescription: "Reading Pane",
+      AXSelectedTextMarkerRange: {},
+      selectedMarkerText: "Marker excerpt",
+    });
+    markerPane.uiElements = () => {
+      throw new Error("Must not inspect the whole message body");
+    };
+    const window = node({ AXRole: "AXWindow", AXSubrole: "AXStandardWindow" }, [messageHeader, markerPane]);
+    expect(JSON.parse(runHeaderScript([window])).selectedText).toBe("Marker excerpt");
   });
 
   it.each([
@@ -196,14 +285,13 @@ describe("Outlook header traversal", () => {
     { role: "AXButton", identifier: "OtherButton", frontmost: true },
     { role: "AXTextField", identifier: "WKWebviewAskCopilotButton", frontmost: true },
     { role: null, identifier: null, frontmost: true },
-  ])("does not send Escape for an unrelated focus or a background app: %j", ({ role, identifier, frontmost }) => {
-    const keyCode = vi.fn();
-    runHeaderScript([messageWindow], {
-      focused: node({ AXRole: role, AXIdentifier: identifier }),
-      frontmost,
-      keyCode,
-    });
-    expect(keyCode).not.toHaveBeenCalled();
+  ])("rejects an unrelated focus or a background app: %j", ({ role, identifier, frontmost }) => {
+    expect(() =>
+      runHeaderScript([messageWindow], {
+        focused: node({ AXRole: role, AXIdentifier: identifier }),
+        frontmost,
+      }),
+    ).toThrow();
   });
   it("ignores the selection popover, folder list and body, and reads the sender from the visible header", () => {
     const folderList = node({ AXRole: "AXOutline" });
@@ -222,7 +310,7 @@ describe("Outlook header traversal", () => {
         ]),
       ]),
     );
-    expect(result).toEqual(header);
+    expect(result).toEqual({ ...capturedHeader, selectedText: null });
   });
 
   it("does not use a background email if the front standard window has no message header", () => {

@@ -229,9 +229,10 @@ eller produksjonsbygg; en vellykket utviklingsbygging er ikke en full typesjekk.
 
 ## Outlook til Todoist (macOS)
 
-**Create Task from Outlook** henter markert tekst fra Outlook med Raycasts
-`getSelectedText()`, og leser emne og avsender fra det synlige meldingshodet.
-Kommandoen bruker macOS-tilgjengelighet via System Events og trenger ikke
+**Create Task from Outlook** henter markert tekst direkte fra Outlooks
+tilgjengelighetsgrensesnitt, og leser emne og avsender fra det synlige meldingshodet.
+Raycasts `getSelectedText()` brukes som reserve hvis Outlook ikke tilbyr den
+native markeringen. Kommandoen bruker macOS-tilgjengelighet og System Events og trenger ikke
 Todoist-tillegget i Outlook eller Microsoft Graph-tilgang.
 
 1. Åpne en e-post i Outlooks leserute eller i et eget vindu.
@@ -249,9 +250,10 @@ med handlingen **Execute Shell Script / Task** og dette skriptet:
 ```
 
 Fjern eventuell global ⌘T-binding i Raycast. Bakgrunnsstarten lar Outlook beholde
-fokus mens teksten leses; oppgaveskjemaet åpnes deretter. Kommandoen lukker
-Outlooks «Forklar dette»-popup hvis den har tatt fokus fra tekstmarkeringen,
-uten å fjerne markeringen. Raycast trenger macOS-tillatelse til tilgjengelighet
+fokus mens teksten leses; oppgaveskjemaet åpnes deretter. Kommandoen leser
+markeringen også når Outlooks «Forklar dette»-popup har fokus. Den sender ikke
+Escape og endrer ikke fokus i e-posten. Feil vises som en kort melding selv ved
+bakgrunnsstart. Raycast trenger macOS-tillatelse til tilgjengelighet
 og til å bruke System Events hvis systemet ber om det.
 
 Emnet fylles inn som tittel. Beskrivelsen inneholder avsenderens navn og
@@ -261,7 +263,7 @@ Du kan redigere alt før oppgaven lagres. E-postemner tolkes som vanlig tekst;
 datoer, `p1`, `#prosjekt` og `@etikett` i emnet endrer ikke andre oppgavefelt.
 
 Kommandoen stopper hvis Outlook ikke er aktiv, markeringen mangler, fokus er
-utenfor e-postens leserute eller meldingshodet ikke kan leses. Den henter ikke
+utenfor e-postens leserute og markeringspopup, eller meldingshodet ikke kan leses. Den henter ikke
 gammelt innhold fra utklippstavlen som reserve. Utdraget logges ikke av
 kommandoen, og automatisk kladdelagring er slått av for dette skjemaet.
 Tilgjengelighetsfeltene kan endres i senere Outlook-versjoner; en uventet
