@@ -41,6 +41,16 @@
   ],
   "commands": [
     {
+      "name": "create-task-from-outlook",
+      "title": "Create Task from Outlook",
+      "subtitle": "Todoist",
+      "description": "Prepare a Todoist task from the Outlook subject, sender, and selected message text.",
+      "mode": "no-view",
+      "platforms": [
+        "macOS"
+      ]
+    },
+    {
       "name": "home",
       "title": "My Tasks",
       "subtitle": "Todoist",

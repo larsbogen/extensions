@@ -1,5 +1,11 @@
 # Todoist Changelog
 
+## Create tasks from selected Outlook text - {PR_MERGE_DATE}
+
+- Add a macOS command that opens the task form with the Outlook subject, sender, and selected email excerpt.
+- Require an Outlook reading-pane selection and complete header metadata; reject changed messages without falling back to clipboard history.
+- Preserve email subjects as literal titles and let the user review the task before saving.
+
 ## Fix focus window task completion - {PR_MERGE_DATE}
 
 - Pass task and session IDs using Raycast's `context` deeplink parameter so the completion command receives them.

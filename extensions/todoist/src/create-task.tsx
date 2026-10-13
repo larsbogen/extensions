@@ -21,6 +21,7 @@ import TaskDetail from "./components/TaskDetail";
 import { getCollaboratorIcon, getProjectCollaborators } from "./helpers/collaborators";
 import { getColorByKey } from "./helpers/colors";
 import { priorities } from "./helpers/priorities";
+import { OutlookTaskDraft } from "./helpers/outlook";
 import { getPriorityIcon } from "./helpers/priorities";
 import { getProjectIcon } from "./helpers/projects";
 import { getTaskAppUrl, getTaskUrl } from "./helpers/tasks";
@@ -49,6 +50,7 @@ type CreateTaskProps = {
   fromProjectId?: string;
   fromTodayEmptyView?: boolean;
   draftValues?: CreateTaskValues;
+  launchContext?: { outlookDraft?: OutlookTaskDraft };
 };
 
 function normalizeWhitespace(content: string) {
@@ -98,7 +100,8 @@ function removePriorityTokens(content: string) {
   return normalizeWhitespace(content.replace(/\bp[1-4]\b/gi, " "));
 }
 
-function CreateTask({ fromProjectId, fromLabel, fromTodayEmptyView, draftValues }: CreateTaskProps) {
+function CreateTask({ fromProjectId, fromLabel, fromTodayEmptyView, draftValues, launchContext }: CreateTaskProps) {
+  const outlookDraft = launchContext?.outlookDraft;
   const { shouldCloseMainWindow } = getPreferenceValues<Preferences.CreateTask>();
 
   const { push, pop } = useNavigation();
@@ -125,7 +128,7 @@ function CreateTask({ fromProjectId, fromLabel, fromTodayEmptyView, draftValues 
         let cleanContent = values.content;
 
         // Remove project references from content if project is selected via dropdown
-        if (values.projectId && projects) {
+        if (!outlookDraft && values.projectId && projects) {
           const selectedProject = projects.find((p) => p.id === values.projectId);
           if (selectedProject) {
             cleanContent = removePrefixedToken(cleanContent, "#", selectedProject.name);
@@ -133,7 +136,7 @@ function CreateTask({ fromProjectId, fromLabel, fromTodayEmptyView, draftValues 
         }
 
         // Remove label references from title when labels are selected.
-        if (Array.isArray(values.labels) && values.labels.length > 0) {
+        if (!outlookDraft && Array.isArray(values.labels) && values.labels.length > 0) {
           for (const label of values.labels) {
             cleanContent = removePrefixedToken(cleanContent, "@", label);
           }
@@ -238,8 +241,8 @@ function CreateTask({ fromProjectId, fromLabel, fromTodayEmptyView, draftValues 
       }
     },
     initialValues: {
-      content: draftValues?.content ?? "",
-      description: draftValues?.description,
+      content: outlookDraft?.content ?? draftValues?.content ?? "",
+      description: outlookDraft?.description ?? draftValues?.description,
       date: draftValues?.date ?? (fromTodayEmptyView ? new Date() : null),
       deadline: draftValues?.deadline ?? null,
       duration: draftValues?.duration ?? "",
@@ -262,7 +265,9 @@ function CreateTask({ fromProjectId, fromLabel, fromTodayEmptyView, draftValues 
   });
 
   // Real-time NLP parsing
-  const parsedData = useNLPParser(values.content, projects, labels);
+  // Email subjects are literal text. Dates, addresses, #tags and p1 in a
+  // subject must not silently change scheduling or disappear from the title.
+  const parsedData = useNLPParser(outlookDraft ? "" : values.content, projects, labels);
 
   // Helper functions to update title based on dropdown changes
   const updateTitleWithPriority = (newPriority: string) => {
@@ -629,6 +634,7 @@ function CreateTask({ fromProjectId, fromLabel, fromTodayEmptyView, draftValues 
 
   // Detect manual field changes and update both tracking AND title
   useEffect(() => {
+    if (outlookDraft) return;
     const now = Date.now();
     const prev = prevValuesRef.current;
 
@@ -828,13 +834,18 @@ function CreateTask({ fromProjectId, fromLabel, fromTodayEmptyView, draftValues 
           <RefreshAction setData={setData} />
         </ActionPanel>
       }
-      enableDrafts={!fromProjectId && !fromTodayEmptyView && !fromLabel}
+      enableDrafts={!outlookDraft && !fromProjectId && !fromTodayEmptyView && !fromLabel}
     >
       <Form.TextField
         {...itemProps.content}
         title="Title"
-        placeholder="Buy milk tomorrow p1 #Personal @This Month {march 30}"
-        info='✨ Smart Task Creation: Type naturally and watch the form fill itself! Try &apos;Buy groceries tomorrow p2 #Home @urgent&apos; or use the dropdowns below - both ways work together seamlessly.
+        placeholder={
+          outlookDraft ? "Oppgavetittel fra e-postens emne" : "Buy milk tomorrow p1 #Personal @This Month {march 30}"
+        }
+        info={
+          outlookDraft
+            ? "Emnet brukes som vanlig tekst. Velg dato, prosjekt og prioritet i feltene nedenfor."
+            : `✨ Smart Task Creation: Type naturally and watch the form fill itself! Try 'Buy groceries tomorrow p2 #Home @urgent' or use the dropdowns below - both ways work together seamlessly.
 
 🎯 What you can type:
 • Priority: p1 (urgent), p2 (high), p3 (medium), p4 (low)
@@ -843,7 +854,8 @@ function CreateTask({ fromProjectId, fromLabel, fromTodayEmptyView, draftValues 
 • Dates: tomorrow, next Friday, Monday at 3pm, in 2 weeks
 • Deadlines: {March 30} or {next month}
 
-💡 The form updates as you type, and any changes in the dropdowns will update your title too!'
+💡 The form updates as you type, and any changes in the dropdowns will update your title too!`
+        }
       />
 
       <Form.TextArea

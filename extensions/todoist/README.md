@@ -227,6 +227,36 @@ Hvis prosjektet flyttes eller Node-installasjonen byttes, kjør
 Node-sti brukes når den er tilgjengelig. Oppsettet erstatter ikke tester, lint
 eller produksjonsbygg; en vellykket utviklingsbygging er ikke en full typesjekk.
 
+## Outlook til Todoist (macOS)
+
+**Create Task from Outlook** henter markert tekst fra Outlook med Raycasts
+`getSelectedText()`, og leser emne og avsender fra det synlige meldingshodet.
+Kommandoen bruker macOS-tilgjengelighet via System Events og trenger ikke
+Todoist-tillegget i Outlook eller Microsoft Graph-tilgang.
+
+1. Åpne en e-post i Outlooks leserute eller i et eget vindu.
+2. Marker tekst i selve e-posten.
+3. Kjør **Create Task from Outlook** i den lokale Todoist-utvidelsen.
+4. Kontroller tittel og beskrivelse, velg eventuelt prosjekt/dato, og bruk
+   **Create Task** for å lagre.
+
+Knytt en hurtigtast til kommandoen under **Raycast Settings → Extensions →
+Todoist → Create Task from Outlook**. Raycast trenger macOS-tillatelse til
+tilgjengelighet og til å bruke System Events hvis systemet ber om det.
+
+Emnet fylles inn som tittel. Beskrivelsen inneholder avsenderens navn og
+e-postadresse, etterfulgt av akkurat det markerte utdraget. Avsenderen gjelder
+den åpne meldingen, også når utdraget kommer fra sitert tekst i tråden.
+Du kan redigere alt før oppgaven lagres. E-postemner tolkes som vanlig tekst;
+datoer, `p1`, `#prosjekt` og `@etikett` i emnet endrer ikke andre oppgavefelt.
+
+Kommandoen stopper hvis Outlook ikke er aktiv, markeringen mangler, fokus er
+utenfor e-postens leserute eller meldingshodet ikke kan leses. Den henter ikke
+gammelt innhold fra utklippstavlen som reserve. Utdraget logges ikke av
+kommandoen, og automatisk kladdelagring er slått av for dette skjemaet.
+Tilgjengelighetsfeltene kan endres i senere Outlook-versjoner; en uventet
+struktur gir en feil fremfor å gjette emne eller avsender.
+
 ## Dagsplan til reMarkable (macOS)
 
 Kommandoen **Send dagsplan til reMarkable** lager en norsk dagsplan med dagens og
