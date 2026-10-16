@@ -1,4 +1,4 @@
-export type { SearchState, VM };
+export type { VM };
 export { VMState, VMAction };
 
 interface VM {
@@ -7,26 +7,27 @@ interface VM {
   description: string;
   os: string;
   state: VMState;
+  rawState: string;
+  home?: string;
 }
 
 enum VMState {
-  Stopped,
-  Resuming,
-  Running,
-  Suspended,
-  Unknown,
+  Stopped = "stopped",
+  Starting = "starting",
+  Resuming = "resuming",
+  Running = "running",
+  Suspended = "suspended",
+  Paused = "paused",
+  Stopping = "stopping",
+  Suspending = "suspending",
+  Pausing = "pausing",
+  Unavailable = "unavailable",
+  Unknown = "unknown",
 }
 
 enum VMAction {
-  Start,
-  Suspend,
-  Resume,
-  Stop,
-  ForceStop,
-  Reset,
-}
-
-interface SearchState {
-  vms: VM[];
-  isLoading: boolean;
+  Suspend = "suspend",
+  Stop = "shutdown",
+  ForceStop = "force-stop",
+  Reset = "reset",
 }

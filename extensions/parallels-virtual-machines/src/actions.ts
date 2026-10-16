@@ -1,108 +1,83 @@
-import { useExec } from "@raycast/utils";
-import { closeMainWindow, showToast, Toast } from "@raycast/api";
+import { Alert, closeMainWindow, confirmAlert, open, openCommandPreferences, showToast, Toast } from "@raycast/api";
+import { ParallelsError, ParallelsService, PARALLELS_BUNDLE_ID } from "./service";
+import { VM, VMAction } from "./types";
 
-import { execFile } from "child_process";
-import { useMemo } from "react";
-import { runAppleScript, showFailureToast } from "@raycast/utils";
+export const parallels = new ParallelsService({
+  openFile: async (path) => {
+    await closeMainWindow();
+    await open(path, PARALLELS_BUNDLE_ID);
+  },
+});
 
-import { VM, VMAction, SearchState } from "./types";
-import { parseVM } from "./utils";
-
-export { findVMs, openVM, runVMAction, shutPrl };
-
-function findVMs(): SearchState {
-  const { isLoading, data } = useExec("/usr/local/bin/prlctl", ["list", "--all", "--full", "--json", "--info"], {
-    onError: showCommandError,
+export async function showOperationFailure(error: unknown, title = "Parallels operation failed"): Promise<void> {
+  await showToast({
+    style: Toast.Style.Failure,
+    title,
+    message: error instanceof Error ? error.message : String(error),
+    primaryAction:
+      error instanceof ParallelsError && error.code === "selection"
+        ? {
+            title: "Open Command Settings",
+            onAction: async () => {
+              await openCommandPreferences();
+            },
+          }
+        : undefined,
   });
-  const results = useMemo<Record<string, string>[]>(() => JSON.parse(data || "[]"), [data]);
-  return {
-    vms: results.map(parseVM),
-    isLoading,
-  };
 }
 
-function openVM(vm: VM): void {
-  closeMainWindow();
+async function withFeedback(
+  title: string,
+  operation: (progress: (message: string) => void) => Promise<void>,
+): Promise<boolean> {
+  const toast = await showToast({ style: Toast.Style.Animated, title });
   try {
-    runAppleScript(`tell application "${vm.name}"\n activate\n end tell`);
-  } catch {
-    showToast({
-      style: Toast.Style.Failure,
-      title: "Could not open virtual machine",
-      message: "Unable to run AppleScript to launch VM, has the VM application been removed or renamed?",
+    await operation((message) => {
+      toast.message = message;
     });
+    toast.style = Toast.Style.Success;
+    toast.title = "Parallels operation completed";
+    toast.message = "";
+    return true;
+  } catch (error) {
+    await toast.hide();
+    await showOperationFailure(error, title.replace(/…$/, " failed"));
+    return false;
   }
 }
 
-function runVMAction(vm: VM, action: VMAction): void {
-  closeMainWindow();
-  (async () => {
-    try {
-      switch (action) {
-        case VMAction.Resume:
-          await execPrlctl(["resume", vm.id]);
-          break;
-        case VMAction.Start:
-          await execPrlctl(["start", vm.id]);
-          break;
-        case VMAction.Suspend:
-          await execPrlctl(["suspend", vm.id]);
-          break;
-        case VMAction.Stop:
-          await execPrlctl(["stop", vm.id]);
-          break;
-        case VMAction.ForceStop:
-          await execPrlctl(["stop", vm.id, "--kill"]);
-          break;
-        case VMAction.Reset:
-          await execPrlctl(["reset", vm.id]);
-          break;
-      }
-    } catch (error) {
-      console.error(error);
-      await showFailureToast(error, {
-        message: "Failed to perform VM action",
-      });
-    }
-  })();
-}
-
-function showCommandError(error: Error): void {
-  console.log(error);
-  showToast({
-    style: Toast.Style.Failure,
-    title: "Could not access virtual machines",
-    message: "You must have Parallels Pro or Business/Enterprise Editions to use this extension",
+export async function openVM(identifier: string): Promise<boolean> {
+  return withFeedback("Opening virtual machine…", async (progress) => {
+    const vm = await parallels.openVM(identifier, progress);
+    progress(`${vm.name} is running`);
   });
 }
 
-function shutPrl(): Promise<void> {
-  closeMainWindow();
-  return execPrlsrvctl(["shutdown", "-f"]);
-}
+const actionTitles: Record<VMAction, string> = {
+  [VMAction.Suspend]: "Suspending virtual machine…",
+  [VMAction.Stop]: "Shutting down virtual machine…",
+  [VMAction.ForceStop]: "Force stopping virtual machine…",
+  [VMAction.Reset]: "Resetting virtual machine…",
+};
 
-function execPrlctl(args: string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    execFile("/usr/local/bin/prlctl", args, (error, stdout, stderr) => {
-      if (error) {
-        console.error(`prlctl ${args.join(" ")}\nstdout: ${stdout}\nstderr: ${stderr}\n`, error);
-        reject(error);
-        return;
-      }
-      resolve();
+export async function runVMAction(vm: VM, action: VMAction): Promise<boolean> {
+  if (action === VMAction.ForceStop || action === VMAction.Reset) {
+    const label = action === VMAction.Reset ? "Reset" : "Force Stop";
+    const confirmed = await confirmAlert({
+      title: `${label} “${vm.name}”?`,
+      message: "This immediately interrupts the virtual machine. Unsaved work may be lost.",
+      primaryAction: { title: label, style: Alert.ActionStyle.Destructive },
+      dismissAction: { title: "Cancel" },
     });
+    if (!confirmed) return false;
+  }
+  return withFeedback(actionTitles[action], async (progress) => {
+    await parallels.controlVM(vm.id, action, progress);
   });
 }
 
-function execPrlsrvctl(args: string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    execFile("/usr/local/bin/prlsrvctl", args, (error, stdout, stderr) => {
-      if (error) {
-        console.error(`prlsrvctl ${args.join(" ")}\nstdout: ${stdout}\nstderr: ${stderr}\n`, error);
-        reject(error);
-        return;
-      }
-      resolve();
-    });
+export async function quitDesktop(): Promise<boolean> {
+  return withFeedback("Quitting Parallels Desktop…", async () => {
+    await parallels.quitDesktop();
   });
 }

@@ -32,15 +32,62 @@
     },
     {
       "name": "shutdown",
-      "title": "Shut Down",
+      "title": "Quit Parallels Desktop",
       "subtitle": "Parallels Desktop",
-      "description": "Correctly shuts down Parallels Desktop and hard-stops services.",
+      "description": "Quit Parallels Desktop after all virtual machines have been shut down or suspended.",
       "keywords": [
         "shutdown",
         "parallels",
         "vm"
       ],
       "mode": "no-view"
+    },
+    {
+      "name": "open-windows",
+      "title": "Open Windows",
+      "subtitle": "Parallels Desktop",
+      "description": "Start or resume and open Windows in Parallels Desktop.",
+      "keywords": [
+        "windows",
+        "open",
+        "start",
+        "åpne"
+      ],
+      "mode": "no-view",
+      "preferences": [
+        {
+          "name": "vmIdentifier",
+          "title": "Virtual Machine Name or UUID",
+          "description": "Exact registered VM name, or its UUID. Use the UUID if names are duplicated or the VM is renamed.",
+          "type": "textfield",
+          "required": true,
+          "default": "Windows 11"
+        }
+      ]
+    },
+    {
+      "name": "open-ubuntu",
+      "title": "Open Ubuntu",
+      "subtitle": "Parallels Desktop",
+      "description": "Start or resume and open Ubuntu in Parallels Desktop.",
+      "keywords": [
+        "ubuntu",
+        "linux",
+        "open",
+        "start",
+        "åpne"
+      ],
+      "mode": "no-view",
+      "preferences": [
+        {
+          "name": "vmIdentifier",
+          "title": "Virtual Machine Name or UUID",
+          "description": "Exact registered VM name, or its UUID. Use the UUID if names are duplicated or the VM is renamed.",
+          "type": "textfield",
+          "required": true,
+          "default": "Ubuntu 26.04 ARM64"
+        }
+      ]
     }
   ],
   "dependencies": {
@@ -53,13 +100,16 @@
     "@types/react": "19.0.10",
     "eslint": "^9.22.0",
     "prettier": "^3.5.3",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "vitest": "^5.0.5"
   },
   "scripts": {
-    "build": "ray build -e dist",
+    "build": "ray build -e dist --output ./dist",
     "dev": "ray develop",
     "fix-lint": "ray lint --fix",
     "lint": "ray lint",
-    "publish": "ray publish"
+    "publish": "ray publish",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   }
 }
