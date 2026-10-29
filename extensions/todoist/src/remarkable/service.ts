@@ -1,3 +1,4 @@
+import { readLocalConfig, recordOverrides } from "../../../../shared/local-config";
 import { constants } from "node:fs";
 import { access, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -56,6 +57,13 @@ async function executable(label: string, override: string | undefined, defaults:
   throw new Error(`${label} ble ikke funnet. Angi en absolutt verktøysti i kommandoens innstillinger.`);
 }
 export async function resolveTools(prefs: ToolPreferences): Promise<Tools> {
+  const common = readLocalConfig();
+  recordOverrides("todoist", prefs, common);
+  prefs = {
+    rm2Path: prefs.rm2Path || common.rm2Path,
+    pdfinfoPath: prefs.pdfinfoPath || common.pdfinfoPath,
+    pdftoppmPath: prefs.pdftoppmPath || common.pdftoppmPath,
+  };
   const search = (name: string) =>
     [...new Set(["/opt/homebrew/bin", "/usr/local/bin", ...(process.env.PATH ?? "").split(path.delimiter), "/usr/bin"])]
       .filter(Boolean)

@@ -109,7 +109,7 @@ export async function createPlanPdf(snapshot: PlanSnapshot, output: string, font
     doc.on("error", reject);
   });
   const segmenter = new Intl.Segmenter("nb", { granularity: "grapheme" });
-  const longDate = format(snapshot.day, { weekday: "long", day: "numeric", month: "long" });
+  const longDate = `${format(snapshot.day, { weekday: "long" })} ${Number(snapshot.day.slice(8))}. ${format(snapshot.day, { month: "long" }).toLocaleLowerCase("nb-NO")}`;
 
   // Inter's OpenType layout is costly, so widths are cached; wrapping reuses word and grapheme widths.
   const widths = new Map<string, number>();

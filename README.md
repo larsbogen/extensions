@@ -29,3 +29,7 @@ Raycast wouldn't be where it is without the feedback from our community, so we w
 ## Community
 
 Join our [Slack community](https://raycast.com/community) to share your extension, debug nasty bugs or simply get to know like-minded folks.
+
+## Personlig lokalt oppsett
+
+Se [PersonalRaycast](tooling/raycast-setup/README.md) for flyttbar konfigurasjon, kontrollerte oppdateringer, tilbakeføring og kommandoer for de personlige utvidelsene.

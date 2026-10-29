@@ -191,41 +191,18 @@ Genererte moduler og testprogram ligger i `work/focus-panel-build/` og kan slett
 etter bygging. Kjørbar app i `assets/focus-panel/` må beholdes for lokal bruk og inngår
 i Raycast-bygg. Den er generert og ikke sjekket inn.
 
-### Automatisk lokal oppdatering på macOS
+### Kontrollert lokal oppdatering på macOS
 
-Kjør dette fra `extensions/todoist` for å installere en LaunchAgent for din bruker:
-
-```sh
-npm run local:install
-```
-
-Tjenesten starter med en gang og ved innlogging, og kjører `ray develop` i
-bakgrunnen. Den overvåker dette prosjektets kildekode, assets og manifest og
-bygger den lokale Raycast-utvidelsen ved endringer. Aktiver **Raycast Settings →
-Extensions → Developer → Auto-reload on save** for automatisk omlasting av åpne
-kommandoer. Bruk den lokale Todoist-versjonen og knytt hurtigtastene til den.
-Stopp eventuelle manuelle `npm run dev`-prosesser før installasjon; ikke kjør en
-ekstra utviklingsprosess mens tjenesten er aktiv.
+Det felles [PersonalRaycast-verktøyet](../../tooling/raycast-setup/README.md) erstatter den permanente utviklingstjenesten. Fra repo-roten:
 
 ```sh
-npm run local:status     # Vis prosessstatus
-npm run local:restart    # Start prosessen på nytt
-npm run local:stop       # Stopp frem til neste innlogging eller local:start
-npm run local:start      # Start igjen
-npm run local:uninstall  # Fjern automatisk oppstart, behold utvidelsen
+./bin/raycast-setup setup
+./bin/raycast-setup check
+./bin/raycast-setup update
+./bin/raycast-setup rollback
 ```
 
-Oppsettet ligger i `~/Library/LaunchAgents/local.raycast.todoist.dev.plist`.
-Byggelogger ligger i `~/Library/Logs/local.raycast.todoist.dev/` (`output.log`
-og `error.log`). Loggene roteres ikke automatisk; de kan tømmes ved behov etter
-at tjenesten er stoppet. Avinstallering beholder loggene og den sist bygde
-utvidelsen. Ingen administratorrettigheter kreves.
-
-Kjør `npm ci` og `npm run local:restart` etter endringer i avhengigheter.
-Hvis prosjektet flyttes eller Node-installasjonen byttes, kjør
-`npm run local:install` på nytt fra den nye plasseringen. Homebrew sin stabile
-Node-sti brukes når den er tilgjengelig. Oppsettet erstatter ikke tester, lint
-eller produksjonsbygg; en vellykket utviklingsbygging er ikke en full typesjekk.
+Kildeendringer tas i bruk etter beståtte kontroller. Fokusøkter og ventende Toggl-arbeid beholdes. `npm run dev` er fortsatt tilgjengelig for eksplisitt utvikling. Eksisterende `local:install` og `local:restart` videresender til oppsett og oppdatering. Tjenesten avvikles først når du kjører den nye installasjonsflyten; det skjer ikke ved bygging eller testing.
 
 ## Outlook til Todoist (macOS)
 

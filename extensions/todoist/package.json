@@ -799,10 +799,12 @@
     "local:stop": "node scripts/local-agent.mjs stop",
     "local:restart": "node scripts/local-agent.mjs restart",
     "local:uninstall": "node scripts/local-agent.mjs uninstall",
-    "lint": "ray lint",
+    "lint": "eslint src tests && prettier --check src tests package.json",
     "fix-lint": "ray lint --fix",
     "publish": "npx @raycast/api@latest publish",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint:store": "ray lint",
+    "typecheck": "tsc --noEmit"
   }
 }

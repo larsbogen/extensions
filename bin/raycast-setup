@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+base=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+for node in "${PERSONAL_RAYCAST_NODE:-}" /opt/homebrew/bin/node /usr/local/bin/node "$(command -v node || true)"; do
+  if [ -n "$node" ] && [ -x "$node" ]; then
+    exec "$node" "$base/tooling/raycast-setup/cli.mjs" "$@"
+  fi
+done
+printf '%s\n' 'Finner ikke Node 24. Installer Node, eller sett PERSONAL_RAYCAST_NODE.' >&2
+exit 1

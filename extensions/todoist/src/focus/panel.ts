@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import removeMarkdown from "remove-markdown";
 
 type FocusTask = { id: string; content: string; projectId?: string };
@@ -144,8 +145,18 @@ const client = createFocusPanelClient({
   executable: join(environment.assetsPath, "focus-panel", "FocusPanel.app", "Contents", "MacOS", "FocusPanel"),
 });
 
+async function recordFocusLocation() {
+  const root = join(homedir(), "Library/Application Support/PersonalRaycast");
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  await writeFile(
+    join(root, "focus-location.json"),
+    JSON.stringify({ directory: join(environment.supportPath, "focus-panel") }),
+    { mode: 0o600 },
+  );
+}
 export async function showFocusPanel(task: FocusTask, minutes = 25) {
   if (process.platform !== "darwin") throw new Error("Det flytende fokusvinduet krever macOS.");
+  await recordFocusLocation();
   await client.start(task, minutes);
 }
 

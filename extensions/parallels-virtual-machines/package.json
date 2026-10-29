@@ -107,9 +107,10 @@
     "build": "ray build -e dist --output ./dist",
     "dev": "ray develop",
     "fix-lint": "ray lint --fix",
-    "lint": "ray lint",
+    "lint": "eslint src tests && prettier --check src tests package.json",
     "publish": "ray publish",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint:store": "ray lint"
   }
 }
