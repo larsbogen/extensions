@@ -34,3 +34,15 @@ Turatlas starter med en separat tilfeldig søkenøkkel, privat lagret og bundet 
 `src/library-search.js` er en lokal kopi av bibliotekets rene `web/search.js`, med samme norske normalisering, AND-semantikk og rangeringsvekter. Ved endringer i bibliotekets søk må kopien og kontrakttestene oppdateres sammen. Kopien inneholder ingen katalogdata.
 
 Se [QA](QA.md) for verifikasjon og begrensninger.
+
+## Lokale tjenester
+
+**Lokale tjenester** viser Turatlas og Masteroppgaver uten å starte dem. Status hentes ved åpning, med `⌘R` og etter en handling. Hver tjeneste viser tidspunktet for siste kontroll og fungerer uavhengig av feil hos den andre.
+
+- **Kjører:** Åpne i standardnettleseren, eller velg **Stopp tjenesten** når kontrollert stopp er tilgjengelig.
+- **Stoppet:** Velg **Start og åpne** eller **Start uten å åpne**. Nettleseren åpnes først når serveren er bekreftet klar.
+- **Starter/stopper:** Vent til tjenesten er klar og oppdater status. Ved usikker status vises en forklaring og tilgang til logg og innstillinger.
+- En Turatlas-server startet utenfor startmekanismen må stoppes der den ble startet.
+- **Vis logg** viser siste 200 linjer, lest fra maksimalt 64 KiB, inne i Raycast. `⌘R` leser loggen på nytt, også etter loggrotasjon. **Vis loggfil i Finder** finner filen. Tekst fra loggen gjengis bokstavelig og beholdes bare i minnet.
+
+Kommandoen bruker de samme prosjekt- og kjøretidsinnstillingene som søk. Kontrollskriptene i begge prosjektene må støtte `status --json`. Manglende eller eldre skript gir en forklaring i raden. Status tar maksimalt 20 sekunder; start/stopp maksimalt 90 sekunder. Ved tidsavbrudd kontrolleres status én gang uten automatisk gjentakelse av handlingen. Ingen menylinje eller ny bakgrunnstjeneste installeres. Bruk eksisterende lokale utviklingsoppsett for å aktivere den oppdaterte utvidelsen; bygg alene installerer den ikke.

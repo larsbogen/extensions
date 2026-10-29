@@ -26,6 +26,22 @@
       "title": "Søk i Turatlas",
       "description": "Søk i Turatlas",
       "mode": "view"
+    },
+    {
+      "name": "local-services",
+      "title": "Lokale tjenester",
+      "description": "Vis status, start, stopp og les logger for lokale tjenester.",
+      "keywords": [
+        "tjenester",
+        "server",
+        "status",
+        "start",
+        "stopp",
+        "logg",
+        "turatlas",
+        "masteroppgaver"
+      ],
+      "mode": "view"
     }
   ],
   "dependencies": {

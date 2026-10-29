@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
+import { configuration, type Settings } from "./settings";
+export type { Settings } from "./settings";
 import { readFile } from "node:fs/promises";
 export type Topic = { id: string; label: string };
 export type File = { path: string; pages: number };
@@ -42,12 +43,6 @@ export type Tours = {
   items: Tour[];
   total: number;
   kinds: string[];
-};
-export type Settings = {
-  libraryPath?: string;
-  atlasPath?: string;
-  pythonPath?: string;
-  nodePath?: string;
 };
 type Connection = { baseUrl: string; token?: string; serverId?: string };
 export function localUrl(value: string): string {
@@ -231,16 +226,9 @@ export class Services {
   }
   private async start(kind: "library" | "atlas"): Promise<Connection> {
     if (kind === "library") {
-      const root = resolve(
-        this.settings.libraryPath ||
-          join(homedir(), "Masteroppgaver/bibliotek"),
-      );
+      const { root, binary } = configuration(this.settings, "library");
       const baseUrl = localUrl(
-        await run(
-          this.settings.pythonPath || "/usr/bin/python3",
-          ["control.py", "start", "--no-open"],
-          root,
-        ),
+        await run(binary, ["control.py", "start", "--no-open"], root),
       );
       const state = JSON.parse(
         await readFile(join(root, "state/server.json"), "utf8"),
@@ -259,10 +247,10 @@ export class Services {
         throw new Error("Bibliotekets serveridentitet kunne ikke bekreftes.");
       return { baseUrl };
     }
-    const root = resolve(this.settings.atlasPath || join(homedir(), "Strava"));
+    const { root, binary } = configuration(this.settings, "atlas");
     const info = JSON.parse(
       await run(
-        this.settings.nodePath || "/opt/homebrew/bin/node",
+        binary,
         [
           "--import",
           "tsx",
