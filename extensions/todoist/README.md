@@ -63,6 +63,20 @@ The distribution build is written to `dist/`; building and testing do not instal
 Kortet viser oppgavetittelen med tekstbryting og en timer. Det har sin egen størrelse;
 Raycasts generelle utseende blir ikke endret.
 
+Kompaktmodus er standard, også ved oppgradering. Kortet starter på 360 × 240 punkter
+(minst 320 punkter bredt), med automatisk minimumshøyde for valgt tekststørrelse.
+Det viser tittel, timer/status, **Pause/Fortsett** og menyen **•••**. Lange titler kan
+rulles uten å forkortes. Menyen gir **Vis detaljer**, **Fullfør oppgave**, **+5 min**,
+**Åpne oppgave**, **Flytt** og **Avslutt økt**. Ubegrensede økter skjuler **+5 min**.
+**Vis detaljer** åpner alle kontrollene nedenfor; velg **Vis kompakt** for å gå tilbake.
+Visningsvalg og størrelse for hver visning huskes separat, sammen med tekststørrelse
+og plassering. Bytte beholder økten og øvre høyre hjørne innenfor skjermen.
+
+Fullføring, feil, ventende synkronisering og ubekreftet Toggl-stopp vises også i
+kompaktmodus. **Prøv igjen** gjentar fullføring; **Se detaljer** åpner de eksisterende
+kontrollene for synkronisering og gjennomgang. Varsler kan øke høyden midlertidig
+uten å endre lagret størrelse. ⌘P, ⌘+ og ⌘↵ virker i begge visninger.
+
 - Velg **Tekst: 20 / 26 / 34 / 42** og **Bredde: 420 / 480 / 640 / 800** direkte i kortet.
   Dra i tittelen eller bruk **Flytt**-menyen for å flytte vinduet, og bruk håndtaket nederst til høyre for fri størrelse.
   Plassering, bredde og tekststørrelse huskes. Svært lange titler kan rulles inne i kortet.
@@ -183,7 +197,7 @@ andre Mac-arkitekturer må bygges der eller gjøres universelt før publisering.
 
 ```sh
 npm run build:focus  # AppKit-hjelpeapp, lokalt signert, ingen nedlasting
-npm run test:focus   # Timer, pauser, gjenoppretting og lagring
+npm run test:focus   # Timer, lagring, Toggl og løsrevne AppKit-visninger
 npm test            # Inkluderer JSON-broen og bekreftelse av oppstart
 ```
 
@@ -335,3 +349,12 @@ forhåndsvisning. En faktisk sending utføres først når brukeren velger sendeh
 Den inkluderte [Noto Emoji-fonten](https://github.com/google/fonts/tree/main/ofl/notoemoji)
 og [Inter](https://github.com/rsms/inter) er distribuert under SIL Open Font License;
 se `assets/daily-plan/OFL.txt` og `assets/daily-plan/Inter-OFL.txt`.
+
+### Verifikasjon av kompaktmodus
+
+Automatiserte Swift-tester dekker migrering av tidligere fokusdata, separate
+størrelser, visningsbytte, timerfaser, handlingsmeny/hurtigtaster, varsler og
+løsrevne AppKit-visninger med lange titler, alle fire tekststørrelser og minste
+bredde. Testene åpner ingen vinduer og bruker ingen ekte kontoer. TypeScript-testene,
+lint og produksjonsbygg kontrolleres separat. Faktisk samspill med skrivebord,
+fysiske skjermer og VoiceOver er ikke verifisert av disse testene.

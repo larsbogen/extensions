@@ -1,5 +1,12 @@
 # Todoist Changelog
 
+## Compact focus window - {PR_MERGE_DATE}
+
+- Default to a compact floating card with pause/resume and an action menu; remember the selected view and separate sizes.
+- Preserve long titles, keyboard shortcuts, session timing and top-right positioning when switching views.
+- Keep completion errors, storage failures and pending Toggl work visible without expanding all controls.
+- Add unattended migration, presentation, layout and action tests using detached AppKit views.
+
 ## Avoid hanging Outlook selection reads - {PR_MERGE_DATE}
 
 - Read focus and selected text directly through macOS Accessibility to avoid System Events recursing on Outlook's selection popover. Preserve the selection without sending Escape or changing focus.

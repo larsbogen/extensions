@@ -2,6 +2,11 @@ import AppKit
 import Darwin
 
 final class FocusPanel: NSPanel {
+    var keyAction: ((NSEvent) -> Bool)?
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if keyAction?(event) == true { return true }
+        return super.performKeyEquivalent(with: event)
+    }
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 }
@@ -70,7 +75,26 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let togglReview = NSButton(title: "Se gjennom", target: nil, action: nil)
     let togglSync = NSButton(title: "Synkroniser", target: nil, action: nil)
     var togglControls: NSStackView!
-    var fixedContentHeight: CGFloat { max(314, contentStack.fittingSize.height - titleAreaHeight.constant + 62) }
+    var fixedContentHeight: CGFloat { contentStack.fittingSize.height - titleAreaHeight.constant + 54 }
+    var expandedRows: [NSView] = []
+    let actionMenu = NSButton(title: "•••", target: nil, action: nil)
+    let noticeLabel = NSTextField(wrappingLabelWithString: "")
+    let retryButton = NSButton(title: "Prøv igjen", target: nil, action: nil)
+    let detailsButton = NSButton(title: "Se detaljer", target: nil, action: nil)
+    var noticeStack: NSStackView!
+    var noticeHeight: NSLayoutConstraint!
+    var previousFrameSize = FocusWindowSize(width: 360, height: 240)
+    var applyingFrame = false
+    var lastLayoutKey = ""
+    var viewWidth: CGFloat { panel?.frame.width ?? contentStack?.superview?.bounds.width ?? CGFloat(snapshot.appearance.size.width) }
+    var viewHeight: CGFloat { panel?.frame.height ?? contentStack?.superview?.bounds.height ?? CGFloat(snapshot.appearance.size.height) }
+    var minimumSize: NSSize {
+        NSSize(width: compact ? 320 : 420, height: fixedContentHeight + max(40, snapshot.appearance.fontSize + 8))
+    }
+    var compact: Bool { snapshot.appearance.mode == .compact }
+    var presentation: FocusPresentation? {
+        snapshot.session.map { FocusPresentation(session: $0, completing: isCompleting) }
+    }
 
     var panel: FocusPanel!
     var ticker: Timer?
@@ -157,7 +181,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func buildPanel() {
         let appearance = snapshot.appearance
-        panel = FocusPanel(contentRect: NSRect(x: 0, y: 0, width: appearance.width, height: appearance.height),
+        panel = FocusPanel(contentRect: NSRect(x: 0, y: 0, width: appearance.size.width, height: appearance.size.height),
                            styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel],
                            backing: .buffered, defer: false)
         panel.title = "Todoist Fokus"
@@ -172,16 +196,32 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.isReleasedWhenClosed = false
         panel.appearance = NSAppearance(named: .darkAqua)
         panel.backgroundColor = NSColor(calibratedRed: 0.10, green: 0.12, blue: 0.115, alpha: 1)
-        panel.minSize = NSSize(width: 420, height: 390)
+        panel.minSize = NSSize(width: compact ? 320 : 420, height: 200)
         panel.maxSize = NSSize(width: 1200, height: 1000)
+        previousFrameSize = appearance.size
         panel.delegate = self
         panel.standardWindowButton(.zoomButton)?.isHidden = true
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.standardWindowButton(.closeButton)?.toolTip = "Lukk vinduet og sett økten på pause"
 
+        panel.keyAction = { [weak self] event in
+            self?.handleShortcut(event.charactersIgnoringModifiers ?? "", modifiers: event.modifierFlags) ?? false
+        }
+        panel.contentView = buildContent()
+        if let x = appearance.x, let y = appearance.y {
+            panel.setFrameOrigin(NSPoint(x: x, y: y))
+        } else if let screen = NSScreen.main {
+            let frame = screen.visibleFrame
+            panel.setFrameOrigin(NSPoint(x: frame.maxX - panel.frame.width - 28, y: frame.maxY - panel.frame.height - 28))
+        }
+        constrainToScreen()
+    }
+
+    // Also built by unattended tests without creating a window or an application.
+    func buildContent() -> NSView {
+        let appearance = snapshot.appearance
         // An opaque surface keeps the small controls readable over bright work apps.
         let backdrop = NSView()
-        panel.contentView = backdrop
         let grip = ResizeGrip()
         grip.translatesAutoresizingMaskIntoConstraints = false
         grip.toolTip = "Dra for å endre størrelsen på fokusvinduet"
@@ -241,7 +281,10 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         completeButton.keyEquivalentModifierMask = [.command]
         completeButton.contentTintColor = .systemGreen
         completeButton.toolTip = "Fullfør oppgaven i Todoist og stopp fokuset"
-        let actions = row([pauseButton, openButton, spacer(), endButton])
+        button(actionMenu, #selector(showActions))
+        actionMenu.setAccessibilityLabel("Handlinger for fokusoppgaven")
+        actionMenu.toolTip = "Handlinger og visning"
+        let actions = row([pauseButton, openButton, spacer(), endButton, actionMenu])
         let completionRow = row([completeButton, spacer()])
         hintLabel.font = .systemFont(ofSize: 12)
         hintLabel.textColor = .secondaryLabelColor
@@ -286,7 +329,22 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         togglStatus.setContentCompressionResistancePriority(.required, for: .vertical)
         activeTimeLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         let togglActions = row([togglSettings, togglReview, spacer(), togglSync])
-        contentStack = NSStackView(views: [header, titleScroll, timeRow, activeTimeLabel, progress, completionRow, actions, hintLabel, togglControls, togglStatus, togglActions, options])
+        button(retryButton, #selector(completeTask))
+        button(detailsButton, #selector(showDetails))
+        noticeLabel.font = .systemFont(ofSize: 12)
+        noticeLabel.maximumNumberOfLines = 0
+        noticeLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+        noticeHeight = noticeLabel.heightAnchor.constraint(equalToConstant: 0)
+        noticeHeight.isActive = true
+        noticeStack = NSStackView(views: [noticeLabel, row([retryButton, detailsButton, spacer()])])
+        noticeStack.orientation = .vertical
+        noticeStack.alignment = .leading
+        noticeStack.spacing = 6
+        noticeStack.detachesHiddenViews = true
+        noticeLabel.widthAnchor.constraint(equalTo: noticeStack.widthAnchor).isActive = true
+        expandedRows = [activeTimeLabel, progress, completionRow, hintLabel, togglActions, options]
+        contentStack = NSStackView(views: [header, titleScroll, timeRow, activeTimeLabel, progress, completionRow, actions, hintLabel, noticeStack, togglControls, togglStatus, togglActions, options])
+        contentStack.detachesHiddenViews = true
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
         contentStack.spacing = 14
@@ -298,21 +356,16 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             contentStack.trailingAnchor.constraint(equalTo: backdrop.trailingAnchor, constant: -24),
             contentStack.bottomAnchor.constraint(lessThanOrEqualTo: backdrop.bottomAnchor, constant: -20),
         ])
-        for view in [header, titleScroll, timeRow, activeTimeLabel, progress, completionRow, actions, hintLabel, togglControls!, togglStatus, togglActions, options] {
+        for view in [header, titleScroll, timeRow, activeTimeLabel, progress, completionRow, actions, hintLabel, togglControls!, togglStatus, togglActions, options, noticeStack!] {
             view.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
         }
-        if let x = appearance.x, let y = appearance.y {
-            panel.setFrameOrigin(NSPoint(x: x, y: y))
-        } else if let screen = NSScreen.main {
-            let frame = screen.visibleFrame
-            panel.setFrameOrigin(NSPoint(x: frame.maxX - panel.frame.width - 28, y: frame.maxY - panel.frame.height - 28))
-        }
-        constrainToScreen()
+        return backdrop
     }
 
     func row(_ views: [NSView]) -> NSStackView {
         let stack = NSStackView(views: views)
         stack.orientation = .horizontal
+        stack.detachesHiddenViews = true
         stack.alignment = .centerY
         stack.spacing = 8
         return stack
@@ -358,7 +411,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         pauseButton.setAccessibilityLabel(pauseButton.title)
         completeButton.title = isCompleting ? "Fullfører …" : "Fullfør oppgave"
         completeButton.setAccessibilityLabel(completeButton.title)
-        completeButton.isEnabled = !isCompleting && session.phase != .ended && session.task.completionURL != nil
+        completeButton.isEnabled = presentation?.canComplete == true
         for control in [pauseButton, extendButton, endButton, durationPicker] { control.isEnabled = !isCompleting }
         if isCompleting {
             hintLabel.stringValue = "Fullfører oppgaven i Todoist. Timeren er satt på pause."
@@ -368,12 +421,12 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         extendButton.isHidden = session.duration == 0
         fontPicker.selectItem(at: [20.0, 26, 34, 42].firstIndex(of: snapshot.appearance.fontSize) ?? 1)
         let widths = [420.0, 480, 640, 800]
-        if let index = widths.firstIndex(where: { abs($0 - panel.frame.width) < 1 }) {
+        if let index = widths.firstIndex(where: { abs($0 - Double(viewWidth)) < 1 }) {
             if widthPicker.numberOfItems > 4 { widthPicker.removeItem(at: 4) }
             widthPicker.selectItem(at: index)
         } else {
             if widthPicker.numberOfItems == 4 { widthPicker.addItem(withTitle: "") }
-            widthPicker.item(at: 4)?.title = "Bredde: \(Int(panel.frame.width))"
+            widthPicker.item(at: 4)?.title = "Bredde: \(Int(viewWidth))"
             widthPicker.selectItem(at: 4)
         }
         let durations = [900.0, 1500, 3000, 0]
@@ -412,23 +465,50 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let seconds = max(0, Int(session.elapsed))
         activeTimeLabel.stringValue = String(format: "Arbeidstid i økten: %d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
         activeTimeLabel.setAccessibilityLabel(activeTimeLabel.stringValue)
-        let minimum = fixedContentHeight + 64
-        panel.minSize = NSSize(width: 420, height: min(800, minimum))
-        if panel.frame.height < panel.minSize.height {
-            var frame = panel.frame
-            frame.origin.y -= panel.minSize.height - frame.height
-            frame.size.height = panel.minSize.height
-            panel.setFrame(frame, display: true)
-            constrainToScreen()
+        for view in expandedRows { view.isHidden = compact }
+        togglControls.isHidden = compact || !connected
+        togglStatus.isHidden = compact || (!connected && snapshot.tracking.periods.allSatisfy { $0.accountID == nil })
+        openButton.isHidden = compact
+        endButton.isHidden = compact
+        extendButton.isHidden = compact || session.duration == 0
+        positionPicker.isHidden = compact
+        let notice = FocusNotice.make(coordinator: coordinator, completing: isCompleting, completionError: completionError)
+        noticeLabel.stringValue = notice.text
+        noticeLabel.setAccessibilityLabel(notice.text)
+        retryButton.isHidden = !notice.retry
+        retryButton.isEnabled = presentation?.canComplete == true
+        detailsButton.isHidden = !notice.details
+        noticeStack.isHidden = notice.text.isEmpty
+        let width = max(1, viewWidth - 48)
+        noticeLabel.preferredMaxLayoutWidth = width
+        noticeHeight.constant = notice.text.isEmpty ? 0 : ceil((notice.text as NSString).boundingRect(
+            with: NSSize(width: width, height: 10000), options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: noticeLabel.font!]).height) + 4
+        let key = "\(compact)-\(snapshot.appearance.fontSize)-\(width)-\(notice.text)-\(togglControls.isHidden)-\(togglStatus.isHidden)"
+        if panel != nil && key != lastLayoutKey {
+            lastLayoutKey = key
+            applySize()
         }
         layoutTitle()
+    }
+
+    func applySize() {
+        guard let panel = panel else { return }
+        applyingFrame = true
+        defer { applyingFrame = false }
+        panel.contentView?.layoutSubtreeIfNeeded()
+        panel.minSize = minimumSize
+        let size = snapshot.appearance.size
+        let target = NSSize(width: max(panel.minSize.width, size.width), height: max(panel.minSize.height, size.height))
+        panel.setFrame(FocusGeometry.frame(anchoredTo: panel.frame, size: target), display: true)
+        constrainToScreen()
     }
 
     func layoutTitle() {
         guard !isLayingOut else { return }
         isLayingOut = true
         defer { isLayingOut = false }
-        let width = max(330, panel.frame.width - 64)
+        let width = max(1, viewWidth - 64)
         let font = NSFont.systemFont(ofSize: snapshot.appearance.fontSize, weight: .semibold)
         titleLabel.font = font
         let height = ceil((titleLabel.stringValue as NSString).boundingRect(
@@ -437,8 +517,8 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         titleWidth.constant = width
         titleHeight.constant = max(font.pointSize + 8, height)
         // Grow to show normal titles in full; unusually long titles remain scrollable.
-        let available = max(64, panel.frame.height - fixedContentHeight)
-        titleAreaHeight.constant = min(max(64, height), available)
+        let available = max(40, viewHeight - fixedContentHeight)
+        titleAreaHeight.constant = min(max(40, height), available)
         titleScroll.documentView?.setFrameSize(NSSize(width: width, height: max(height, titleAreaHeight.constant)))
         if lastTitleWidth != width {
             titleLabel.preferredMaxLayoutWidth = width
@@ -447,7 +527,8 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func growForTitle(fit: Bool = false) {
-        let width = max(330, panel.frame.width - 64)
+        if compact { layoutTitle(); return }
+        let width = max(1, viewWidth - 64)
         let font = NSFont.systemFont(ofSize: snapshot.appearance.fontSize, weight: .semibold)
         let height = ceil((titleLabel.stringValue as NSString).boundingRect(
             with: NSSize(width: width, height: 10000), options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: font]).height) + 8
@@ -528,12 +609,65 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return true
     }
 
+    func handleShortcut(_ key: String, modifiers: NSEvent.ModifierFlags) -> Bool {
+        guard modifiers.contains(.command), modifiers.intersection([.option, .control]).isEmpty else { return false }
+        switch key {
+        case "p" where !modifiers.contains(.shift): togglePause()
+        case "+", "=" : extendSession()
+        case "\r" where !modifiers.contains(.shift): completeTask()
+        default: return false
+        }
+        return true
+    }
+
+    func makeActionsMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        func add(_ title: String, _ selector: Selector, _ enabled: Bool = true) {
+            let item = NSMenuItem(title: title, action: selector, keyEquivalent: "")
+            item.target = self; item.isEnabled = enabled; menu.addItem(item)
+        }
+        add(compact ? "Vis detaljer" : "Vis kompakt", #selector(toggleViewMode))
+        menu.addItem(.separator())
+        add(isCompleting ? "Fullfører …" : "Fullfør oppgave", #selector(completeTask), presentation?.canComplete == true)
+        if snapshot.session?.duration != 0 { add("+5 min", #selector(extendSession), presentation?.canExtend == true) }
+        add("Åpne oppgave", #selector(openTask))
+        let move = NSMenuItem(title: "Flytt", action: nil, keyEquivalent: "")
+        let positions = NSMenu()
+        for (index, title) in positionPicker.itemTitles.enumerated() where index > 0 {
+            let item = NSMenuItem(title: title, action: #selector(moveFromMenu(_:)), keyEquivalent: "")
+            item.tag = index; item.target = self; positions.addItem(item)
+        }
+        move.submenu = positions; menu.addItem(move)
+        add("Avslutt økt", #selector(endSession), presentation?.canEnd == true)
+        return menu
+    }
+
+    @objc func showActions() {
+        makeActionsMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: actionMenu.bounds.maxY), in: actionMenu)
+    }
+    @objc func moveFromMenu(_ sender: NSMenuItem) {
+        positionPicker.selectItem(at: sender.tag)
+        movePanel()
+    }
+    @objc func toggleViewMode() {
+        snapshot.appearance.mode = compact ? .expanded : .compact
+        lastLayoutKey = ""
+        render()
+        save()
+    }
+    @objc func showDetails() {
+        if compact { toggleViewMode() }
+    }
+
     @objc func togglePause() {
+        guard presentation?.canPause == true else { return }
         coordinator.togglePause()
         render()
     }
 
     @objc func extendSession() {
+        guard presentation?.canExtend == true else { return }
         coordinator.editSession { $0.extend() }
         render()
     }
@@ -623,6 +757,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func endSession() {
+        guard presentation?.canEnd == true else { return }
         guard coordinator.end() else { return }
         hideForSync()
     }
@@ -662,9 +797,19 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if panel.frame != frame { panel.setFrame(frame, display: true) }
     }
 
-    func windowDidResize(_ notification: Notification) { layoutTitle() }
-    func windowDidEndLiveResize(_ notification: Notification) { save() }
-    func windowDidMove(_ notification: Notification) { save() }
+    func windowDidResize(_ notification: Notification) {
+        guard contentStack != nil else { return }
+        let actual = FocusWindowSize(width: panel.frame.width, height: panel.frame.height)
+        if !applyingFrame { snapshot.appearance.recordResize(from: previousFrameSize, to: actual) }
+        previousFrameSize = actual
+        layoutTitle()
+    }
+    func windowDidEndLiveResize(_ notification: Notification) {
+        lastLayoutKey = ""
+        render()
+        save()
+    }
+    func windowDidMove(_ notification: Notification) { if !applyingFrame { save() } }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard coordinator.pause() else { return false }
         hideForSync()
@@ -673,10 +818,8 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func save() {
         guard let panel = panel else { return }
-        snapshot.appearance.width = panel.frame.width
-        snapshot.appearance.height = panel.frame.height
         snapshot.appearance.x = panel.frame.origin.x
-        snapshot.appearance.y = panel.frame.origin.y
+        snapshot.appearance.y = panel.frame.maxY - snapshot.appearance.size.height
         if coordinator.persist() { lastSave = ProcessInfo.processInfo.systemUptime }
     }
 
@@ -694,6 +837,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
 }
 
+#if !FOCUS_TEST
 @main
 struct FocusMain {
     static func main() {
@@ -712,3 +856,5 @@ struct FocusMain {
         withExtendedLifetime(controller) { application.run() }
     }
 }
+
+#endif

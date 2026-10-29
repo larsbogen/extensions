@@ -99,12 +99,48 @@ struct FocusSession: Codable {
     mutating func end() { phase = .ended }
 }
 
+enum FocusViewMode: String, Codable { case compact, expanded }
+
+struct FocusWindowSize: Codable, Equatable {
+    var width: Double
+    var height: Double
+}
+
 struct FocusAppearance: Codable {
     var fontSize: Double = 26
+    // Legacy width/height remain the expanded size, including after migration.
     var width: Double = 480
     var height: Double = 350
     var x: Double?
     var y: Double?
+    var mode: FocusViewMode = .compact
+    var compactSize = FocusWindowSize(width: 360, height: 240)
+
+    init(fontSize: Double = 26, width: Double = 480, height: Double = 350, x: Double? = nil, y: Double? = nil) {
+        self.fontSize = fontSize; self.width = width; self.height = height; self.x = x; self.y = y
+    }
+    var size: FocusWindowSize {
+        get { mode == .compact ? compactSize : FocusWindowSize(width: width, height: height) }
+        set {
+            if mode == .compact { compactSize = newValue }
+            else { width = newValue.width; height = newValue.height }
+        }
+    }
+    mutating func recordResize(from previous: FocusWindowSize, to actual: FocusWindowSize) {
+        // A width-only resize must not adopt a temporary warning height.
+        size = FocusWindowSize(width: actual.width, height: abs(actual.height - previous.height) > 0.5 ? actual.height : size.height)
+    }
+    enum CodingKeys: String, CodingKey { case fontSize, width, height, x, y, mode, compactSize }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        fontSize = try values.decodeIfPresent(Double.self, forKey: .fontSize) ?? 26
+        width = try values.decodeIfPresent(Double.self, forKey: .width) ?? 480
+        height = try values.decodeIfPresent(Double.self, forKey: .height) ?? 350
+        x = try values.decodeIfPresent(Double.self, forKey: .x)
+        y = try values.decodeIfPresent(Double.self, forKey: .y)
+        mode = try values.decodeIfPresent(FocusViewMode.self, forKey: .mode) ?? .compact
+        compactSize = try values.decodeIfPresent(FocusWindowSize.self, forKey: .compactSize) ?? FocusWindowSize(width: 360, height: 240)
+    }
 }
 
 struct FocusSnapshot: Codable {

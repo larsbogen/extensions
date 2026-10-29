@@ -17,6 +17,7 @@ mkdirSync(join(assets, "MacOS"), { recursive: true });
 const common = ["-module-cache-path", join(work, "module-cache"), "-swift-version", "5"];
 const modelSources = [
   "FocusSession.swift",
+  "FocusPresentation.swift",
   "FocusRequestInbox.swift",
   "TrackingState.swift",
   "TogglClient.swift",
@@ -28,6 +29,10 @@ if (process.argv.includes("--test")) {
   const test = join(work, "session-tests");
   run([
     ...modelSources,
+    "-D", "FOCUS_TEST",
+    join(source, "FocusPanel.swift"),
+    join(source, "TogglUI.swift"),
+    join(source, "PresentationTests.swift"),
     join(source, "SessionTests.swift"),
     join(source, "RequestTests.swift"),
     join(source, "TrackingTests.swift"),
