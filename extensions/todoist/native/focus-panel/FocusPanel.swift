@@ -105,6 +105,11 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var isCompleting = false
     var completionStarted: TimeInterval = 0
     var completionError: String?
+    var nextStarted: TimeInterval = 0
+    var nextError: String?
+    let nextButton = NSButton(title: "Neste oppgave", target: nil, action: nil)
+    let breakButton = NSButton(title: "Ta pause", target: nil, action: nil)
+    var queueRow: NSStackView!
     let titleLabel = DragLabel(wrappingLabelWithString: "")
     let statusLabel = DragLabel(labelWithString: "FOKUS · TODOIST")
     let clockLabel = NSTextField(labelWithString: "25:00")
@@ -286,6 +291,9 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         actionMenu.toolTip = "Handlinger og visning"
         let actions = row([pauseButton, openButton, spacer(), endButton, actionMenu])
         let completionRow = row([completeButton, spacer()])
+        button(nextButton, #selector(nextTask))
+        button(breakButton, #selector(takeBreak))
+        queueRow = row([nextButton, breakButton, spacer()])
         hintLabel.font = .systemFont(ofSize: 12)
         hintLabel.textColor = .secondaryLabelColor
         hintLabel.maximumNumberOfLines = 2
@@ -343,7 +351,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         noticeStack.detachesHiddenViews = true
         noticeLabel.widthAnchor.constraint(equalTo: noticeStack.widthAnchor).isActive = true
         expandedRows = [activeTimeLabel, progress, completionRow, hintLabel, togglActions, options]
-        contentStack = NSStackView(views: [header, titleScroll, timeRow, activeTimeLabel, progress, completionRow, actions, hintLabel, noticeStack, togglControls, togglStatus, togglActions, options])
+        contentStack = NSStackView(views: [header, titleScroll, timeRow, activeTimeLabel, progress, completionRow, actions, queueRow!, hintLabel, noticeStack, togglControls, togglStatus, togglActions, options])
         contentStack.detachesHiddenViews = true
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
@@ -356,7 +364,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             contentStack.trailingAnchor.constraint(equalTo: backdrop.trailingAnchor, constant: -24),
             contentStack.bottomAnchor.constraint(lessThanOrEqualTo: backdrop.bottomAnchor, constant: -20),
         ])
-        for view in [header, titleScroll, timeRow, activeTimeLabel, progress, completionRow, actions, hintLabel, togglControls!, togglStatus, togglActions, options, noticeStack!] {
+        for view in [header, titleScroll, timeRow, activeTimeLabel, progress, completionRow, actions, queueRow!, hintLabel, togglControls!, togglStatus, togglActions, options, noticeStack!] {
             view.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
         }
         return backdrop
@@ -412,7 +420,24 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         completeButton.title = isCompleting ? "Fullfører …" : "Fullfør oppgave"
         completeButton.setAccessibilityLabel(completeButton.title)
         completeButton.isEnabled = presentation?.canComplete == true
-        for control in [pauseButton, extendButton, endButton, durationPicker] { control.isEnabled = !isCompleting }
+        pauseButton.isEnabled = presentation?.canPause == true
+        extendButton.isEnabled = presentation?.canExtend == true
+        endButton.isEnabled = presentation?.canEnd == true
+        durationPicker.isEnabled = presentation?.canPause == true
+        queueRow.isHidden = session.task.queue == nil
+        nextButton.title = session.pendingNextRequestId != nil ? "Henter neste …" : session.queueCompleted == true ? "Start neste" : "Neste oppgave"
+        nextButton.setAccessibilityLabel(nextButton.title)
+        nextButton.isEnabled = presentation?.canNext == true
+        breakButton.isHidden = session.phase != .finished || session.queueCompleted == true
+        breakButton.isEnabled = presentation?.canPause == true
+        if session.task.queue != nil && session.phase == .finished { pauseButton.title = "Fortsett" }
+        if session.queueCompleted == true {
+            statusLabel.stringValue = "OPPGAVEN ER FULLFØRT"
+            hintLabel.stringValue = "Start neste når du er klar. Pausen registreres ikke."
+        }
+        if session.queueFinished == true { hintLabel.stringValue = "Ingen flere oppgaver i køen. Åpne arbeidsdagen for å velge mer." }
+        pauseButton.isHidden = session.queueCompleted == true
+        pauseButton.setAccessibilityLabel(pauseButton.title)
         if isCompleting {
             hintLabel.stringValue = "Fullfører oppgaven i Todoist. Timeren er satt på pause."
         } else if let error = completionError {
@@ -469,10 +494,12 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         togglControls.isHidden = compact || !connected
         togglStatus.isHidden = compact || (!connected && snapshot.tracking.periods.allSatisfy { $0.accountID == nil })
         openButton.isHidden = compact
-        endButton.isHidden = compact
+        endButton.isHidden = compact && session.task.queue == nil
         extendButton.isHidden = compact || session.duration == 0
         positionPicker.isHidden = compact
-        let notice = FocusNotice.make(coordinator: coordinator, completing: isCompleting, completionError: completionError)
+        var notice = FocusNotice.make(coordinator: coordinator, completing: isCompleting, completionError: completionError)
+        if let error = nextError { notice.text = [notice.text, error].filter { !$0.isEmpty }.joined(separator: "\n") }
+        if session.queueFinished == true { notice.text = [notice.text, "Ingen flere oppgaver i køen. Åpne arbeidsdagen for å velge mer."].filter { !$0.isEmpty }.joined(separator: "\n") }
         noticeLabel.stringValue = notice.text
         noticeLabel.setAccessibilityLabel(notice.text)
         retryButton.isHidden = !notice.retry
@@ -558,6 +585,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         updateElapsed()
         consumeRequest()
         consumeCompletion()
+        consumeNextResult()
         render()
         if snapshot.session?.phase == .running && ProcessInfo.processInfo.systemUptime - lastSave >= 5 { save() }
         coordinator.retryIfDue()
@@ -582,10 +610,18 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func handleRequest(_ request: FocusRequest) -> Bool {
         if request.id == snapshot.requestId || snapshot.acknowledgedRequests.contains(request.id) { return true }
-        if request.action == "start", let task = request.task, !task.id.isEmpty, !task.title.isEmpty {
+        if request.action == "start-queue", let expiresAt = request.expiresAt,
+           expiresAt < Date().timeIntervalSince1970 { return acknowledge(request) }
+        if ["start", "start-queue"].contains(request.action), let task = request.task, !task.id.isEmpty, !task.title.isEmpty {
+            if request.transitionRequestId != nil && snapshot.session?.acceptsTransition(request) != true { return acknowledge(request) }
+            if request.action == "start-queue" && task.queue == nil { return acknowledge(request) }
             isHiddenForSync = false
             let previousID = snapshot.session?.id
-            guard coordinator.start(task: task, duration: request.duration ?? 1500) else { return false }
+            guard coordinator.start(task: task, duration: request.duration ?? 1500, originRequestId: request.id) else { return false }
+            snapshot.session?.originRequestId = request.id
+            snapshot.session?.pendingNextRequestId = nil
+            snapshot.session?.queueFinished = nil
+            nextError = nil
             if previousID != snapshot.session?.id {
                 isCompleting = false
                 completionError = nil
@@ -593,7 +629,9 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } else if request.action == "stop" {
             if let sessionId = request.sessionId, sessionId != snapshot.session?.id { return acknowledge(request) }
             if request.taskId == nil || request.taskId == snapshot.session?.task.id {
-                guard coordinator.end(), acknowledge(request) else { return false }
+                if request.automatic == true && snapshot.session?.task.queue != nil &&
+                    (isCompleting || snapshot.session?.queueCompleted == true || hasCompletionIntent()) { return acknowledge(request) }
+                guard coordinator.end(clearQueue: true), acknowledge(request) else { return false }
                 hideForSync()
                 return true
             }
@@ -631,6 +669,10 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(.separator())
         add(isCompleting ? "Fullfører …" : "Fullfør oppgave", #selector(completeTask), presentation?.canComplete == true)
         if snapshot.session?.duration != 0 { add("+5 min", #selector(extendSession), presentation?.canExtend == true) }
+        if snapshot.session?.task.queue != nil {
+            add(snapshot.session?.queueCompleted == true ? "Start neste" : "Neste oppgave", #selector(nextTask), presentation?.canNext == true)
+            if snapshot.session?.phase == .finished { add("Ta pause", #selector(takeBreak), presentation?.canPause == true) }
+        }
         add("Åpne oppgave", #selector(openTask))
         let move = NSMenuItem(title: "Flytt", action: nil, keyEquivalent: "")
         let positions = NSMenu()
@@ -721,7 +763,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func completeTask() {
-        guard !isCompleting, let session = snapshot.session, session.phase != .ended,
+        guard presentation?.canComplete == true, let session = snapshot.session, session.phase != .ended,
               let url = session.completionDeeplink else { return }
         guard coordinator.pause() else { return }
         completionError = nil
@@ -737,6 +779,13 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         render()
     }
 
+    func hasCompletionIntent() -> Bool {
+        guard let session = snapshot.session,
+              let data = try? Data(contentsOf: directory.appendingPathComponent("complete-\(session.id).json")),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return value["sessionId"] as? String == session.id && value["taskId"] as? String == session.task.id
+    }
+
     func consumeCompletion() {
         if let data = try? Data(contentsOf: directory.appendingPathComponent("completion.json")),
            let result = try? JSONDecoder().decode(FocusCompletionResult.self, from: data),
@@ -744,8 +793,15 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if result.success {
                 guard coordinator.end() else { return }
                 isCompleting = false
-                save()
-                hideForSync()
+                completionError = nil
+                if snapshot.session?.task.queue != nil {
+                    snapshot.session?.queueCompleted = true
+                    save()
+                    render()
+                } else {
+                    save()
+                    hideForSync()
+                }
                 return
             }
             isCompleting = false
@@ -756,9 +812,47 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    @objc func takeBreak() {
+        guard presentation?.canPause == true else { return }
+        _ = coordinator.pause()
+        render()
+    }
+
+    @objc func nextTask() {
+        guard presentation?.canNext == true, let session = snapshot.session else { return }
+        let requestId = UUID().uuidString
+        guard let url = session.nextDeeplink(requestId: requestId), coordinator.pause() else { return }
+        snapshot.session?.pendingNextRequestId = requestId
+        guard coordinator.persist() else { snapshot.session?.pendingNextRequestId = nil; return }
+        nextError = nil
+        nextStarted = ProcessInfo.processInfo.systemUptime
+        if !NSWorkspace.shared.open(url) {
+            snapshot.session?.pendingNextRequestId = nil
+            nextError = "Kunne ikke åpne Raycast. Prøv Neste oppgave igjen."
+            _ = coordinator.persist()
+        }
+        render()
+    }
+
+    func consumeNextResult() {
+        guard let session = snapshot.session, let requestId = session.pendingNextRequestId else { return }
+        if let data = try? Data(contentsOf: directory.appendingPathComponent("next.json")),
+           let result = try? JSONDecoder().decode(FocusNextResult.self, from: data),
+           result.sessionId == session.id, result.requestId == requestId {
+            snapshot.session?.pendingNextRequestId = nil
+            snapshot.session?.queueFinished = result.empty == true
+            nextError = result.error
+            _ = coordinator.persist()
+        } else if ProcessInfo.processInfo.systemUptime - nextStarted > 45 {
+            snapshot.session?.pendingNextRequestId = nil
+            nextError = "Neste oppgave kunne ikke bekreftes. Prøv igjen; økten er pauset."
+            _ = coordinator.persist()
+        }
+    }
+
     @objc func endSession() {
         guard presentation?.canEnd == true else { return }
-        guard coordinator.end() else { return }
+        guard coordinator.end(clearQueue: true) else { return }
         hideForSync()
     }
 

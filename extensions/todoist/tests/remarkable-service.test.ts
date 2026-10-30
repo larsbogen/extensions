@@ -91,7 +91,7 @@ describe("setup and PDF validation", () => {
 });
 
 describe("preview pipeline", () => {
-  it("exports and validates all pages, retains the frozen snapshot, removes rendered images and does not upload", async () => {
+  it("exports and validates all pages, retains snapshot and preview images, removes temporary images and does not upload", async () => {
     const states: string[] = [];
     const source = snapshot();
     const job = await service.export(source, folder, (s) => states.push(s));
@@ -101,6 +101,9 @@ describe("preview pipeline", () => {
     source.tasks[0].title = "changed later";
     expect((await service.load(job.id)).snapshot.tasks[0].title).toBe("Oppgave");
     expect(await readdir(service.directory(job.id))).not.toContain("rendered");
+    const pages = await service.previewPages(job.id);
+    expect(pages.map((file) => path.basename(file))).toEqual(["page-1.png", "page-2.png"]);
+    expect(await readFile(pages[0])).toEqual(png);
     expect(runner.mock.calls.some(([, args]) => args[1] === "upload")).toBe(false);
   });
   it("stops after a PDF generation failure, with no rendering or sending", async () => {
@@ -147,6 +150,101 @@ describe("preview pipeline", () => {
     ).rejects.toThrow("pågår allerede");
     release();
     await first;
+  });
+});
+
+describe("local preview cache", () => {
+  it("finds the latest export for the selected Todoist account", async () => {
+    const first = {
+      ...snapshot(),
+      version: 2 as const,
+      ordering: "manual" as const,
+      topThree: [],
+      workday: { accountId: "a", day: "2026-10-30", revision: 1, entryIds: ["e"] },
+    };
+    const a = await service.export(first, folder);
+    await service.export(
+      { ...snapshot(), version: 2, ordering: "manual", topThree: [], workday: { ...first.workday, accountId: "b" } },
+      folder,
+    );
+    expect((await service.latest("a"))?.id).toBe(a.id);
+  });
+  it("reuses validated cached pages without any subprocess or upload", async () => {
+    const job = await service.export(snapshot(), folder);
+    runner.mockClear();
+    await expect(service.previewPages(job.id)).resolves.toHaveLength(2);
+    expect(runner).not.toHaveBeenCalled();
+    expect((await service.load(job.id)).state).toBe("ready");
+  });
+  it.each(["missing", "corrupt", "legacy"])(
+    "regenerates a %s cache from the same PDF without changing the frozen job",
+    async (failure) => {
+      const job = await service.export(snapshot(), folder);
+      const files = await service.previewPages(job.id);
+      const before = await readFile(path.join(service.directory(job.id), "job.json"), "utf8");
+      if (failure === "missing") await rm(files[1]);
+      else if (failure === "corrupt") {
+        const damaged = Buffer.from(png);
+        damaged[40] ^= 1;
+        await writeFile(files[0], damaged);
+      } else await rm(path.join(service.directory(job.id), "preview"), { recursive: true });
+      runner.mockClear();
+      const restored = await service.previewPages(job.id);
+      expect(restored).toHaveLength(2);
+      expect(await readFile(restored[0])).toEqual(png);
+      expect(await readFile(path.join(service.directory(job.id), "job.json"), "utf8")).toBe(before);
+      expect(runner.mock.calls.filter(([, args]) => args[0] === "-png")).toHaveLength(1);
+      expect(runner.mock.calls.some(([, args]) => args[0] === "cloud")).toBe(false);
+    },
+  );
+  it("rejects changed PDFs before reading or regenerating cached pages", async () => {
+    const job = await service.export(snapshot(), folder);
+    await writeFile(service.pdfPath(job), "changed PDF");
+    runner.mockClear();
+    await expect(service.previewPages(job.id)).rejects.toThrow("PDF-en er endret");
+    expect(runner).not.toHaveBeenCalled();
+  });
+  it.each(["sent", "uncertain", "sending"])(
+    "restores old preview images without changing %s upload state",
+    async (state) => {
+      const job = await service.export(snapshot(), folder);
+      const record = { ...job, state };
+      const file = path.join(service.directory(job.id), "job.json");
+      await writeFile(file, JSON.stringify(record));
+      await rm(path.join(service.directory(job.id), "preview"), { recursive: true });
+      runner.mockClear();
+      await expect(service.previewPages(job.id)).resolves.toHaveLength(2);
+      expect(JSON.parse(await readFile(file, "utf8"))).toEqual(record);
+      expect(runner.mock.calls.some(([, args]) => args[0] === "cloud")).toBe(false);
+    },
+  );
+  it("shares concurrent preview requests and keeps failed regenerations retryable", async () => {
+    const job = await service.export(snapshot(), folder);
+    await rm(path.join(service.directory(job.id), "preview"), { recursive: true });
+    runner.mockRejectedValueOnce(new Error("offline local tool"));
+    await expect(service.previewPages(job.id)).rejects.toThrow("offline local tool");
+    expect((await service.load(job.id)).state).toBe("ready");
+    const [first, second] = await Promise.all([service.previewPages(job.id), service.previewPages(job.id)]);
+    expect(first).toEqual(second);
+  });
+  it("sorts page images numerically beyond nine pages", async () => {
+    runner.mockImplementation(async (_exe, args) => {
+      if (args[0] === "-png") {
+        const dir = path.dirname(args.at(-1)!);
+        for (let page = 12; page > 0; page--)
+          await writeFile(path.join(dir, `page-${String(page).padStart(2, "0")}.png`), png);
+      }
+      return {
+        code: 0,
+        stdout: `Pages: 12\n${Array.from({ length: 12 }, (_, i) => `Page ${i + 1} size: 447 x 596 pts`).join("\n")}\n`,
+        stderr: "",
+      };
+    });
+    const job = await service.export(snapshot(), folder);
+    const files = await service.previewPages(job.id);
+    expect(files.map((file) => path.basename(file))).toEqual(
+      Array.from({ length: 12 }, (_, i) => `page-${String(i + 1).padStart(2, "0")}.png`),
+    );
   });
 });
 

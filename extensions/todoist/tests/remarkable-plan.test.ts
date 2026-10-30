@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { Project, Task } from "../src/api";
-import { createSnapshot, dailyTasks, dateParts, nestTasks, osloDay } from "../src/remarkable/plan";
+import {
+  createSnapshot,
+  createWorkdaySnapshot,
+  dailyTasks,
+  dateParts,
+  isSnapshotStale,
+  nestTasks,
+  osloDay,
+  planTasks,
+  previewPage,
+} from "../src/remarkable/plan";
 import { planMarkdown } from "../src/remarkable/markdown";
+import { addTaskToPlan, createWorkday, markCompleted, toggleTopThree } from "../src/workday/model";
 
 const projects = [
   { id: "work", name: "Arbeid", child_order: 1, parent_id: null },
@@ -103,6 +114,54 @@ describe("Oslo daily selection", () => {
 });
 
 describe("frozen export and print content", () => {
+  it("exports the canonical manual order with independent top three, including undated and future tasks", () => {
+    const tasks = [
+      task("child", { project_id: "work", parent_id: "parent", due: null }),
+      task("other", { due: { date: "2026-10-01" } as Task["due"] }),
+      task("parent", { project_id: "work" }),
+      task("done"),
+    ];
+    let plan = createWorkday("me", "2026-09-24");
+    for (const value of tasks) plan = addTaskToPlan(plan, value, projects, now);
+    plan = toggleTopThree(plan, plan.entries[2].id);
+    plan = markCompleted(plan, plan.entries[3].id);
+    plan.revision = 7;
+    const snapshot = createWorkdaySnapshot(plan, tasks, projects, now);
+    expect(snapshot.version).toBe(2);
+    expect(snapshot.tasks.map((t) => t.id)).toEqual(["child", "other", "parent"]);
+    expect(planTasks(tasks, projects, "me", now)).toHaveLength(4);
+    if (snapshot.version !== 2) throw new Error("Expected v2");
+    expect(snapshot.topThree).toEqual(["parent"]);
+    expect(snapshot.workday.entryIds).toEqual(plan.entries.slice(0, 3).map((entry) => entry.id));
+    const markdown = planMarkdown(snapshot);
+    const list = markdown.slice(markdown.indexOf("## Arbeidsrekkefølge"));
+    expect(list.indexOf("- [ ] child")).toBeLessThan(list.indexOf("- [ ] other"));
+    expect(list.indexOf("- [ ] other")).toBeLessThan(list.indexOf("- [ ] parent"));
+    expect(markdown).toContain("1. parent");
+    expect(list).not.toContain("## Arbeid\n");
+    expect(list).toContain("Prosjekt: Arbeid");
+    expect(isSnapshotStale(snapshot, plan)).toBe(false);
+    expect(isSnapshotStale(snapshot, { ...plan, revision: 8 })).toBe(true);
+    expect(isSnapshotStale(snapshot, { ...plan, accountId: "other" })).toBe(true);
+    expect(() =>
+      createWorkdaySnapshot(
+        { ...plan, entries: [...plan.entries, { ...plan.entries[0], id: "new-entry", taskId: "new-task" }] },
+        tasks,
+        projects,
+        now,
+      ),
+    ).toThrow("endret under");
+    tasks[0].content = "edited after export";
+    plan.entries.reverse();
+    expect(snapshot.tasks[0].title).toBe("child");
+  });
+  it("keeps page navigation bounded, including a single page and missing cache", () => {
+    expect(previewPage(0, -1, 12)).toBe(0);
+    expect(previewPage(8, 1, 12)).toBe(9);
+    expect(previewPage(11, 1, 12)).toBe(11);
+    expect(previewPage(0, 1, 1)).toBe(0);
+    expect(previewPage(5, 1, 0)).toBe(0);
+  });
   it("rejects empty selections and does not change a snapshot after selection or source changes", () => {
     const tasks = dailyTasks([task("a"), task("b")], projects, "me", now);
     expect(() => createSnapshot(tasks, new Set(), now)).toThrow("Velg minst");

@@ -173,7 +173,7 @@ export async function createPlanPdf(snapshot: PlanSnapshot, output: string, font
     if (line || !lines.length) lines.push(line);
     return lines.map((line) => runs(line, style));
   }
-  // Only the timeline shortens text; every task is printed in full in the list below it.
+  // Timeline/focus summaries may shorten text; every task is printed in full in the list.
   function ellipsize(text: string, style: Style, maxWidth: number): Line {
     const full = runs(text, style);
     if (full.width <= maxWidth) return full;
@@ -323,6 +323,27 @@ export async function createPlanPdf(snapshot: PlanSnapshot, output: string, font
     }
     const number: Style = { font: "display", size: 13, color: FAINT };
     for (let i = 0; i < 3; i++) {
+      const focus =
+        snapshot.version === 2 ? snapshot.tasks.find((task) => task.id === snapshot.topThree[i]) : undefined;
+      if (snapshot.version === 2) {
+        const rowTop = top + (i * height) / 3;
+        const bottom = top + ((i + 1) * height) / 3;
+        draw(runs(String(i + 1), number), LEFT, rowTop + 14, number);
+        if (focus) {
+          const style: Style = { font: "medium", size: 7.8 };
+          const title = wrap(focus.title, style, column - 18);
+          draw(title[0], LEFT + 16, rowTop + 11, style);
+          if (title[1]) {
+            const remainder = title
+              .slice(1)
+              .flatMap((line) => line.runs.map((run) => run.text))
+              .join(" ");
+            draw(ellipsize(remainder, style, column - 18), LEFT + 16, rowTop + 22, style);
+          }
+        }
+        rule(LEFT + 14, LEFT + column, bottom, 0.6, INK);
+        continue;
+      }
       // The last line shares the timeline's closing rule.
       const at = top + 24 + i * ((height - 24) / 2);
       draw(runs(String(i + 1), number), LEFT, at - 2, number);
@@ -350,13 +371,22 @@ export async function createPlanPdf(snapshot: PlanSnapshot, output: string, font
     planning();
     listing = true;
     gridTop = y;
-    const entries = nestTasks(snapshot.tasks);
+    const manual = snapshot.version === 2;
+    const entries = manual ? snapshot.tasks.map((task) => ({ task, depth: 0 })) : nestTasks(snapshot.tasks);
+    if (manual) {
+      project = { name: "Arbeidsrekkefølge", count: entries.length };
+      heading(project.name, project.count);
+      gridTop = y;
+    }
     const boxes = new Map<string, { page: number; x: number; bottom: number }>();
     entries.forEach(({ task, depth }, index) => {
       const boxX = LEFT + Math.min(depth, 3) * 16;
       const textX = boxX + 20;
       const textW = LEFT + TASK_W - 14 - textX;
-      const caption = depth === 0 && task.parentTitle ? wrap(`↳ ${task.parentTitle}`, CAPTION, textW) : [];
+      const caption = [
+        ...(manual ? wrap(task.projectName, CAPTION, textW) : []),
+        ...(depth === 0 && task.parentTitle ? wrap(`↳ ${task.parentTitle}`, CAPTION, textW) : []),
+      ];
       const title = wrap(task.title, TITLE, textW);
       const tagText = task.overdue ? runs("FORFALT", TAG) : undefined;
       const tagW = tagText ? tagText.width + 8 : 0;
@@ -368,7 +398,7 @@ export async function createPlanPdf(snapshot: PlanSnapshot, output: string, font
       );
       // Normal tasks stay intact. Oversized tasks continue at line boundaries.
       const keep = block <= BOTTOM - TOP - 22 - HEADING_H;
-      if (task.projectId !== entries[index - 1]?.task.projectId) {
+      if (!manual && task.projectId !== entries[index - 1]?.task.projectId) {
         let count = 0;
         while (entries[index + count]?.task.projectId === task.projectId) count++;
         project = undefined;

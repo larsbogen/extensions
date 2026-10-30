@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { getDocument, type PDFDocumentLoadingTask } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { createPlanPdf } from "../src/remarkable/pdf";
-import { createSnapshot, type PlanTask } from "../src/remarkable/plan";
+import { createSnapshot, type PlanSnapshot, type PlanTask } from "../src/remarkable/plan";
 
 let directory: string;
 let loading: PDFDocumentLoadingTask | undefined;
@@ -24,14 +24,19 @@ const task = (i: number): PlanTask => ({
   duration: "30 min",
   deadline: "2026-09-25",
 });
-async function generate(tasks: PlanTask[]) {
+async function generate(tasks: PlanTask[], manual = false) {
   directory = await mkdtemp(path.join(os.tmpdir(), "daily-plan-pdf-"));
   const file = path.join(directory, "plan.pdf");
-  await createPlanPdf(
-    createSnapshot(tasks, new Set(tasks.map((t) => t.id)), new Date("2026-09-24T12:00:00Z")),
-    file,
-    path.resolve("assets/daily-plan"),
-  );
+  let snapshot: PlanSnapshot = createSnapshot(tasks, new Set(tasks.map((t) => t.id)), new Date("2026-09-24T12:00:00Z"));
+  if (manual)
+    snapshot = {
+      ...snapshot,
+      version: 2,
+      ordering: "manual",
+      topThree: [tasks[2].id, tasks[0].id],
+      workday: { accountId: "me", day: snapshot.day, revision: 1, entryIds: tasks.map((task) => task.id) },
+    };
+  await createPlanPdf(snapshot, file, path.resolve("assets/daily-plan"));
   loading = getDocument({ data: new Uint8Array(await readFile(file)), isEvalSupported: false });
   return await loading.promise;
 }
@@ -51,6 +56,42 @@ async function pageTexts(result: Awaited<ReturnType<typeof generate>>) {
   return texts;
 }
 describe("actual generated PDF", () => {
+  it("prints v2 focus highlights independently while preserving manual task order and parent context", async () => {
+    const tasks = [task(0), task(7), task(2)];
+    tasks.forEach((task) => {
+      task.dueTime = undefined;
+    });
+    tasks[0].title = "BARNETS FULLSTENDIGE OPPGAVE";
+    tasks[0].parentId = "2";
+    tasks[0].parentTitle = "FORELDER";
+    tasks[1].title = "MELLOMOPPGAVE";
+    tasks[2].title = "FORELDER";
+    const result = await generate(tasks, true);
+    const texts = await pageTexts(result);
+    const full = texts.join(" ");
+    const heading = /ARBEIDSREKKEFØLGE|A R B E I D S R E K K E F Ø L G E/.exec(full);
+    expect(heading).not.toBeNull();
+    const list = full.slice(heading!.index);
+    expect(list.indexOf("BARNETS FULLSTENDIGE OPPGAVE")).toBeLessThan(list.indexOf("MELLOMOPPGAVE"));
+    expect(list.indexOf("MELLOMOPPGAVE")).toBeLessThan(list.lastIndexOf("FORELDER"));
+    const firstPage = await result.getPage(1);
+    const content = await firstPage.getTextContent();
+    const focusTexts = content.items
+      .filter((item) => "str" in item && item.transform[4] < 220 && item.transform[5] > 340)
+      .map((item) => ("str" in item ? item.str : ""))
+      .join(" ");
+    expect(focusTexts).toContain("FORELDER");
+    expect(focusTexts).toContain("BARNETS FULLSTENDIGE");
+    for (let page = 1; page <= result.numPages; page++) {
+      const items = (await (await result.getPage(page)).getTextContent()).items.filter((item) => "str" in item);
+      for (const item of items) {
+        expect(item.transform[4]).toBeGreaterThanOrEqual(39);
+        expect(item.transform[4] + item.width).toBeLessThanOrEqual(420);
+        expect(item.transform[5]).toBeGreaterThan(15);
+        expect(item.transform[5]).toBeLessThan(570);
+      }
+    }
+  });
   it("preserves Norwegian, emoji and literal text across reMarkable pages with a footer on every page", async () => {
     const tasks = Array.from({ length: 13 }, (_, i) => task(i));
     tasks[2].title = "Ærlig <script>hei</script> **tekst** & [lenke](url) 👨‍👩‍👧‍👦";

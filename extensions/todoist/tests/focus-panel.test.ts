@@ -32,7 +32,9 @@ describe("floating focus panel bridge", () => {
   let lastRequest: Record<string, unknown>;
   async function acknowledge() {
     const files = (await readdir(join(directory, "requests"))).filter((name) => name.endsWith(".json")).sort();
-    let state: { requestId?: string; acknowledgedRequests: string[] } = { acknowledgedRequests: [] };
+    let state: { requestId?: string; acknowledgedRequests: string[]; session?: { originRequestId?: string } } = {
+      acknowledgedRequests: [],
+    };
     try {
       state = JSON.parse(await readFile(join(directory, "state.json"), "utf8"));
       state.acknowledgedRequests ??= [];
@@ -43,7 +45,11 @@ describe("floating focus panel bridge", () => {
       const request = JSON.parse(await readFile(join(directory, "requests", file), "utf8"));
       expect((await stat(join(directory, "requests", file))).mode & 0o777).toBe(0o600);
       lastRequest = request;
-      state = { requestId: request.id, acknowledgedRequests: [...state.acknowledgedRequests, request.id] };
+      state = {
+        requestId: request.id,
+        acknowledgedRequests: [...state.acknowledgedRequests, request.id],
+        session: request.action === "start-queue" ? { originRequestId: request.id } : state.session,
+      };
       await writeFile(join(directory, "state.json"), JSON.stringify(state));
       await rm(join(directory, "requests", file), { force: true });
     }
@@ -107,6 +113,41 @@ describe("floating focus panel bridge", () => {
     expect(await readdir(join(directory, "requests"))).toEqual([]);
   });
 
+  it("uses a versioned queue action and passes account, project and queue context without credentials", async () => {
+    const client = createFocusPanelClient({ executable, directory, launch: acknowledge });
+    const queue = { accountId: "owner", day: "2026-10-30", entryId: "entry-a", revision: 3 };
+    await client.start(
+      { id: "a", content: "A", projectId: "p", projectName: "Prosjekt", todoistUserId: "owner", queue },
+      25,
+    );
+    expect(lastRequest.action).toBe("start-queue");
+    expect(lastRequest.task).toEqual(
+      expect.objectContaining({ queue, projectName: "Prosjekt", todoistUserId: "owner" }),
+    );
+    expect(JSON.stringify(lastRequest)).not.toMatch(/token|password/i);
+  });
+
+  it("does not accept an acknowledged but stale guarded transition", async () => {
+    const client = createFocusPanelClient({
+      executable,
+      directory,
+      launch: async () => {
+        const request = JSON.parse(await readFile(await requestFile(), "utf8"));
+        await writeFile(
+          join(directory, "state.json"),
+          JSON.stringify({ requestId: request.id, session: { originRequestId: "another-start" } }),
+        );
+      },
+    });
+    await expect(
+      client.start(
+        { id: "b", content: "B", queue: { accountId: "owner", day: "2026-10-30", entryId: "b", revision: 1 } },
+        25,
+        { sessionId: "old-session", requestId: "old-next" },
+      ),
+    ).rejects.toThrow("Fokusøkten er endret");
+  });
+
   it("can show pending Toggl work after the Todoist focus has been cleared", async () => {
     const client = createFocusPanelClient({ executable, directory, launch: acknowledge });
     expect(await client.showPending()).toBe(false);
@@ -120,6 +161,51 @@ describe("floating focus panel bridge", () => {
     );
     expect(await client.showPending()).toBe(true);
     expect(lastRequest.action).toBe("show");
+  });
+
+  it("reopens an existing queued session without replacing its timer or metadata", async () => {
+    const client = createFocusPanelClient({ executable, directory, launch: acknowledge });
+    expect(await client.showExisting("a")).toBe(false);
+    await client.start({ id: "a", content: "A" }, 25);
+    await writeFile(
+      join(directory, "state.json"),
+      JSON.stringify({
+        session: {
+          id: "original-session",
+          phase: "paused",
+          elapsed: 120,
+          task: {
+            id: "a",
+            todoistUserId: "owner",
+            queue: { accountId: "owner", day: "2026-10-30", entryId: "a", revision: 1 },
+          },
+        },
+      }),
+    );
+    expect(await client.showExisting("a")).toBe(true);
+    expect(lastRequest.action).toBe("show");
+    expect(lastRequest.task).toBeUndefined();
+    expect(await client.showExisting("different-task")).toBe(false);
+  });
+
+  it("reopens a completed queue with cleared focus cache and no pending Toggl work", async () => {
+    const client = createFocusPanelClient({ executable, directory, launch: acknowledge });
+    await client.start({ id: "a", content: "A" }, 25);
+    await writeFile(
+      join(directory, "state.json"),
+      JSON.stringify({
+        session: {
+          id: "finished",
+          phase: "ended",
+          queueCompleted: true,
+          task: { id: "a", queue: { accountId: "owner", day: "2026-10-30", entryId: "a", revision: 1 } },
+        },
+        tracking: { periods: [] },
+      }),
+    );
+    expect(await client.showPending()).toBe(true);
+    expect(lastRequest.action).toBe("show");
+    expect(lastRequest.task).toBeUndefined();
   });
 
   it("targets stop to the saved session so a late command cannot stop a new session of the same task", async () => {
@@ -136,6 +222,17 @@ describe("floating focus panel bridge", () => {
   it("does not report success before the helper has acknowledged the request", async () => {
     const client = createFocusPanelClient({ executable, directory, launch: async () => undefined, timeoutMs: 10 });
     await expect(client.start({ id: "a", content: "A" }, 25)).rejects.toThrow("svarte ikke");
+  });
+
+  it("removes expired queue starts instead of blocking an older helper inbox", async () => {
+    const client = createFocusPanelClient({ executable, directory, launch: async () => undefined, timeoutMs: 10 });
+    await expect(
+      client.start(
+        { id: "a", content: "A", queue: { accountId: "owner", day: "2026-10-30", entryId: "a", revision: 1 } },
+        25,
+      ),
+    ).rejects.toThrow("svarte ikke");
+    expect(await readdir(join(directory, "requests"))).toEqual([]);
   });
 
   it("reports missing builds and invalid durations without launching anything", async () => {

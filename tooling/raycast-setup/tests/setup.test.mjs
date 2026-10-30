@@ -187,6 +187,30 @@ test("live lock rejects concurrent operation", async (t) => {
   await save(join(f.root, "operation.lock"), { pid: process.pid });
   await assert.rejects(f.manager.update(), /annen/);
 });
+test("candidate focus compatibility comes from its source and rollback retains old limits", async (t) => {
+  const f = await fixture(t);
+  await f.manager.update();
+  await save(
+    join(f.repo, "extensions/todoist/focus-state-versions.json"),
+    [1, 2, 3],
+  );
+  await f.manager.update();
+  assert.deepEqual(
+    (await json(join(f.root, "state.json"))).focusVersions,
+    [1, 2, 3],
+  );
+  f.host.version = 3;
+  await assert.rejects(f.manager.rollback(), /fokus|kompatib/i);
+});
+test("unknown focus compatibility metadata fails without activation", async (t) => {
+  const f = await fixture(t);
+  await save(join(f.repo, "extensions/todoist/focus-state-versions.json"), [
+    1,
+    "3",
+  ]);
+  await assert.rejects(f.manager.update(), /kompatibilitetsliste/);
+  assert.equal(await json(join(f.root, "state.json"), null), null);
+});
 test("interrupted transaction recovers on next operation", async (t) => {
   const f = await fixture(t);
   await mkdir(f.target);

@@ -86,7 +86,7 @@ function MenuBar() {
     const isFocusedTaskInItems = data.items.some((t) => t.id === focusedTask.id);
 
     if (!isFocusedTaskInItems) {
-      unfocusTask();
+      unfocusTask({ automatic: true });
     }
   }, [focusedTask.id, unfocusTask, data?.items, isLoading]);
 
@@ -144,7 +144,7 @@ function MenuBar() {
 
       <MenuBarExtra.Section>
         {focusedTask.id !== "" && (
-          <MenuBarExtra.Item icon={Icon.MinusCircle} title="Unfocus the current task" onAction={unfocusTask} />
+          <MenuBarExtra.Item icon={Icon.MinusCircle} title="Unfocus the current task" onAction={() => unfocusTask()} />
         )}
 
         <MenuBarExtra.Item

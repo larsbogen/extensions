@@ -32,6 +32,9 @@ vi.mock("../src/api", () => ({ closeTask: mocks.close, initialSync: mocks.sync, 
 vi.mock("../src/helpers/menu-bar", () => ({ refreshMenuBarCommand: mocks.refresh }));
 vi.mock("../src/helpers/withTodoistApi", () => ({ withTodoistApi: (fn: unknown) => fn }));
 import { completeFocusedTask } from "../src/complete-focused-task";
+import { WorkdayStore } from "../src/workday/store";
+import { addTaskToPlan } from "../src/workday/model";
+import type { Task, Project } from "../src/api";
 
 const sessionId = "11111111-1111-4111-8111-111111111111";
 const props = {
@@ -116,6 +119,129 @@ describe("complete from focus card", () => {
       expect.objectContaining({ message: expect.stringContaining("fokusetiketten") }),
     );
   });
+  it("records queued completion before acknowledging success and does not repeat a confirmed command", async () => {
+    const task = {
+      id: "task-a",
+      content: "A",
+      project_id: "p",
+      labels: ["focus"],
+      due: { date: "2026-10-30", is_recurring: true },
+    } as unknown as Task;
+    const projects = [{ id: "p", name: "P" }] as Project[];
+    const store = new WorkdayStore(join(mocks.environment.supportPath, "workdays"));
+    const plan = await store.update("owner", "2026-10-30", (plan) => addTaskToPlan(plan, task, projects));
+    await writeFile(
+      join(directory, "state.json"),
+      JSON.stringify({
+        session: {
+          id: sessionId,
+          phase: "paused",
+          task: {
+            id: task.id,
+            queue: { accountId: "owner", day: "2026-10-30", entryId: plan.entries[0].id, revision: plan.revision },
+          },
+        },
+      }),
+    );
+    mocks.sync.mockResolvedValue({ user: { id: "owner" }, items: [task], projects });
+    await completeFocusedTask(props);
+    expect((await store.read("owner", "2026-10-30"))!.entries[0].status).toBe("completed");
+    expect((await result()).success).toBe(true);
+    await completeFocusedTask(props);
+    expect(mocks.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries an uncertain recurring completion with the original ID even after its date advances", async () => {
+    const task = {
+      id: "task-a",
+      content: "A",
+      project_id: "p",
+      labels: [],
+      due: { date: "2026-10-30", is_recurring: true },
+    } as unknown as Task;
+    const projects = [{ id: "p", name: "P" }] as Project[];
+    const store = new WorkdayStore(join(mocks.environment.supportPath, "workdays"));
+    const plan = await store.update("owner", "2026-10-30", (plan) => addTaskToPlan(plan, task, projects));
+    await writeFile(
+      join(directory, "state.json"),
+      JSON.stringify({
+        session: {
+          id: sessionId,
+          phase: "paused",
+          task: {
+            id: task.id,
+            queue: { accountId: "owner", day: "2026-10-30", entryId: plan.entries[0].id, revision: plan.revision },
+          },
+        },
+      }),
+    );
+    mocks.sync.mockResolvedValue({ user: { id: "owner" }, items: [task], projects });
+    mocks.close.mockRejectedValueOnce(new Error("lost response"));
+    await completeFocusedTask(props);
+    mocks.sync.mockResolvedValue({
+      user: { id: "owner" },
+      items: [{ ...task, due: { ...task.due, date: "2026-10-31" } }],
+      projects,
+    });
+    await completeFocusedTask(props);
+    expect(mocks.close.mock.calls.map((call) => call[2])).toEqual([sessionId, sessionId]);
+    expect((await result()).success).toBe(true);
+    expect((await store.read("owner", "2026-10-30"))!.entries[0].status).toBe("completed");
+  });
+
+  it("does not complete a recurring occurrence already advanced elsewhere before this card's first attempt", async () => {
+    const task = {
+      id: "task-a",
+      content: "A",
+      project_id: "p",
+      labels: [],
+      due: { date: "2026-10-30", is_recurring: true },
+    } as unknown as Task;
+    const projects = [{ id: "p", name: "P" }] as Project[];
+    const store = new WorkdayStore(join(mocks.environment.supportPath, "workdays"));
+    const plan = await store.update("owner", "2026-10-30", (plan) => addTaskToPlan(plan, task, projects));
+    await writeFile(
+      join(directory, "state.json"),
+      JSON.stringify({
+        session: {
+          id: sessionId,
+          phase: "paused",
+          task: {
+            id: task.id,
+            queue: { accountId: "owner", day: "2026-10-30", entryId: plan.entries[0].id, revision: plan.revision },
+          },
+        },
+      }),
+    );
+    mocks.sync.mockResolvedValue({
+      user: { id: "owner" },
+      items: [{ ...task, due: { ...task.due, date: "2026-10-31" } }],
+      projects,
+    });
+    await completeFocusedTask(props);
+    expect(mocks.close).not.toHaveBeenCalled();
+    expect((await result()).success).toBe(false);
+  });
+
+  it("recovers a dead completion owner and reuses its durable intent", async () => {
+    const lock = join(directory, `complete-${sessionId}.lock`);
+    await mkdir(lock);
+    await writeFile(join(lock, "owner.json"), JSON.stringify({ pid: 2147483647 }));
+    await writeFile(join(directory, `complete-${sessionId}.json`), JSON.stringify({ sessionId, taskId: "task-a" }));
+    const original = process.kill.bind(process);
+    const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (pid === 2147483647) throw Object.assign(new Error("dead"), { code: "ESRCH" });
+      return original(pid, signal);
+    });
+    try {
+      await completeFocusedTask(props);
+    } finally {
+      kill.mockRestore();
+    }
+    expect(mocks.close).toHaveBeenCalledWith("task-a", expect.anything(), sessionId);
+    expect((await result()).success).toBe(true);
+  });
+
   it("suppresses overlapping clicks", async () => {
     let release!: () => void;
     const wait = new Promise<void>((resolve) => {

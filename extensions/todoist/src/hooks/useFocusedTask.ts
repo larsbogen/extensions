@@ -1,52 +1,19 @@
 import { closeMainWindow, getPreferenceValues, Toast, environment, showToast } from "@raycast/api";
 import { showFailureToast, useCachedState } from "@raycast/utils";
 
-import { CachedDataParams, initialSync, SyncData, Task, updateTask } from "../api";
-import { showFocusPanel, stopFocusPanel } from "../focus/panel";
+import { CachedDataParams, Task } from "../api";
+import { clearFocusedTask, FocusedTask, startFocusedTask } from "../focus/service";
 
-/** Takes the cached data from the caller, so the hook doesn't parse the whole cache again for each task. */
+/** Reuses the caller's cache while all entry points share the same focus service. */
 export const useFocusedTask = ({ data, setData }: CachedDataParams) => {
-  const { focusLabelName, showFocusWindow, focusDuration } = getPreferenceValues<Preferences>();
+  const { showFocusWindow } = getPreferenceValues<Preferences>();
+  const [focusedTask, setFocusedTask] = useCachedState<FocusedTask>("todoist.focusedTask", { id: "", content: "" });
 
-  const { commandMode } = environment;
-
-  const [focusedTask, setFocusedTask] = useCachedState<{ id: string; content: string; projectId?: string }>(
-    "todoist.focusedTask",
-    { id: "", content: "" },
-  );
-
-  async function clearFocusedTask() {
-    if (!focusedTask.id) {
-      return;
-    }
-
-    await stopFocusPanel(focusedTask.id);
-
-    if (focusLabelName && focusLabelName.trim().length > 0) {
-      if (commandMode === "view") {
-        await showToast({ style: Toast.Style.Animated, title: "Removing focus label" });
-      }
-
-      // Need to sync the task before removing the label to avoid race condition.
-      const syncData = (await initialSync()) as SyncData;
-      const task = syncData.items.find((t) => t.id === focusedTask.id);
-
-      if (task) {
-        const labels = task.labels.filter((label) => label !== focusLabelName.trim());
-        await updateTask({ id: focusedTask.id, labels }, { data: syncData, setData });
-      }
-    }
-
-    setFocusedTask({ id: "", content: "" });
-
-    if (commandMode === "view") {
-      await showToast({ style: Toast.Style.Success, title: "No more focus" });
-    }
-  }
-
-  async function unfocusTask() {
+  async function unfocusTask(options: { automatic?: boolean } = {}) {
     try {
-      await clearFocusedTask();
+      if (!(await clearFocusedTask({ data, setData }, options))) return false;
+      setFocusedTask({ id: "", content: "" });
+      if (environment.commandMode === "view") await showToast({ style: Toast.Style.Success, title: "No more focus" });
       return true;
     } catch (error) {
       await showFailureToast(error, { title: "Unable to unfocus task" });
@@ -54,22 +21,13 @@ export const useFocusedTask = ({ data, setData }: CachedDataParams) => {
     }
   }
 
-  async function focusTask({ id, content, labels, project_id }: Task) {
+  async function focusTask(task: Task) {
     try {
-      if (focusedTask.id && focusedTask.id !== id && !(await unfocusTask())) return;
-      if (focusLabelName && focusLabelName.trim().length > 0) {
-        if (commandMode === "view") {
-          await showToast({ style: Toast.Style.Animated, title: "Adding focus label" });
-        }
-        await updateTask({ id, labels: [...new Set([...labels, focusLabelName.trim()])] }, { data, setData });
-      }
-      // Preserve the full title; shortening belongs only in the menu bar renderer.
-      setFocusedTask({ id, content, projectId: project_id });
-      if (process.platform === "darwin" && showFocusWindow !== false) {
-        await showFocusPanel({ id, content, projectId: project_id }, Number(focusDuration ?? "25"));
-        if (commandMode === "view") await closeMainWindow();
-      } else if (commandMode === "view") {
-        await showToast({ style: Toast.Style.Success, title: `Focus on "${content}" 🎯` });
+      await startFocusedTask(task, { data, setData });
+      setFocusedTask({ id: task.id, content: task.content, projectId: task.project_id });
+      if (environment.commandMode === "view") {
+        if (process.platform === "darwin" && showFocusWindow !== false) await closeMainWindow();
+        else await showToast({ style: Toast.Style.Success, title: `Focus on "${task.content}" 🎯` });
       }
     } catch (error) {
       await showFailureToast(error, { title: "Unable to focus task" });

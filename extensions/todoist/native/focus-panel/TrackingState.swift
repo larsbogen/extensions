@@ -206,7 +206,17 @@ final class FocusStore {
     init(directory: URL) { file = directory.appendingPathComponent("state.json") }
     func load() throws -> FocusSnapshot? {
         guard FileManager.default.fileExists(atPath: file.path) else { return nil }
-        return try JSONDecoder().decode(FocusSnapshot.self, from: Data(contentsOf: file))
+        let data = try Data(contentsOf: file)
+        let snapshot = try JSONDecoder().decode(FocusSnapshot.self, from: data)
+        let header = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        if let version = header?["version"] as? Int, version < 3 {
+            let backup = file.deletingLastPathComponent().appendingPathComponent("state-v\(version)-before-workday.json")
+            if !FileManager.default.fileExists(atPath: backup.path) {
+                try data.write(to: backup, options: .withoutOverwriting)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backup.path)
+            }
+        }
+        return snapshot
     }
     func save(_ snapshot: FocusSnapshot) throws {
         let data = try JSONEncoder().encode(snapshot)

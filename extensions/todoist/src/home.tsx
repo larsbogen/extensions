@@ -9,6 +9,7 @@ import ProjectTasks from "./components/ProjectTasks";
 import TaskDetail from "./components/TaskDetail";
 import TodayTasks from "./components/TodayTasks";
 import UpcomingTasks from "./components/UpcomingTasks";
+import { WorkdaySections } from "./components/Workday";
 import { getColorByKey } from "./helpers/colors";
 import { getFilterAppUrl, getFilterUrl } from "./helpers/filters";
 import { getLabelAppUrl, getLabelUrl } from "./helpers/labels";
@@ -22,6 +23,7 @@ export type ViewType =
   | "today"
   | "upcoming"
   | "completed"
+  | "workday"
   | `project_${string}`
   | `label_${string}`
   | `filter_${string}`;
@@ -64,7 +66,11 @@ export function Home({ launchContext }: LaunchProps) {
     let searchBarPlaceholder = defaultSearchBarPlaceholder;
     let navigationTitle = view as string;
 
-    if (view === "inbox") {
+    if (view === "workday") {
+      navigationTitle = "Min arbeidsdag";
+      searchBarPlaceholder = "Finn en oppgave i arbeidsdagen";
+      component = <WorkdaySections />;
+    } else if (view === "inbox") {
       navigationTitle = "Inbox";
       component = (
         <InboxTasks
@@ -171,6 +177,7 @@ export function Home({ launchContext }: LaunchProps) {
       searchBarAccessory={
         <List.Dropdown tooltip="Select View" onChange={(view) => setView(view as ViewType)} value={view}>
           <List.Dropdown.Section>
+            <List.Dropdown.Item title="Min arbeidsdag" value="workday" icon={Icon.Center} />
             <List.Dropdown.Item title="Inbox" value="inbox" icon={{ source: Icon.Tray, tintColor: Color.Blue }} />
             <List.Dropdown.Item title="Today" value="today" icon={{ source: Icon.Calendar, tintColor: Color.Green }} />
             <List.Dropdown.Item

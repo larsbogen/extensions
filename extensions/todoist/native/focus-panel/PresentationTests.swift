@@ -126,6 +126,42 @@ struct PresentationTests {
         }
         let storageAndStop = FocusNotice.make(coordinator: failing, completing: false, completionError: "Fullføring feilet")
         assert(storageAndStop.text.contains("Kunne ikke lagre") && storageAndStop.text.contains("Stopp er ikke bekreftet") && storageAndStop.retry)
+        do {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("focus-queue-view-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            var queued = session
+            queued.task.queue = FocusQueueContext(accountId: "owner", day: "2026-10-30", entryId: "a", revision: 1)
+            queued.task.nextURL = "raycast://extensions/doist/todoist/next-focus-task"
+            queued.phase = .paused
+            let engine = FocusCoordinator(snapshot: FocusSnapshot(session: queued), client: TogglClient(transport: transport), write: { _ in })
+            let view = FocusController(directory: directory, lockDescriptor: -1)
+            view.coordinator = engine
+            let content = view.buildContent()
+            content.frame = NSRect(x: 0, y: 0, width: 360, height: 800)
+            view.render()
+            assert(!view.queueRow.isHidden && view.nextButton.isEnabled)
+            view.isCompleting = true
+            let automaticStop = FocusRequest(id: "auto-missing-task", action: "stop", taskId: queued.task.id, sessionId: queued.id, automatic: true)
+            assert(view.handleRequest(automaticStop))
+            assert(engine.snapshot.session?.phase == .paused && !view.isHiddenForSync,
+                   "A cache update from completing the task must not hide the queued card")
+            let result = FocusCompletionResult(sessionId: queued.id, success: true)
+            try JSONEncoder().encode(result).write(to: directory.appendingPathComponent("completion.json"))
+            view.consumeCompletion()
+            assert(engine.snapshot.session?.phase == .ended && engine.snapshot.session?.queueCompleted == true)
+            assert(!view.isHiddenForSync && view.nextButton.title == "Start neste" && !view.pauseButton.isEnabled)
+            assert(view.nextButton.isEnabled && !view.endButton.isHidden)
+            engine.snapshot.session?.pendingNextRequestId = "pending"
+            view.render()
+            assert(!view.nextButton.isEnabled && !view.completeButton.isEnabled && !view.endButton.isEnabled)
+            engine.snapshot.session?.pendingNextRequestId = nil
+            engine.snapshot.session?.queueFinished = true
+            view.render()
+            assert(!view.nextButton.isEnabled && view.noticeLabel.stringValue.contains("Ingen flere oppgaver"))
+            assert(engine.end(clearQueue: true))
+            assert(engine.snapshot.session?.task.queue == nil, "Explicit unfocus ends the queue; automatic completion cleanup does not")
+        }
         let oldFrame = CGRect(x: 700, y: 300, width: 480, height: 600)
         let newFrame = FocusGeometry.frame(anchoredTo: oldFrame, size: CGSize(width: 360, height: 240))
         assert(newFrame.maxX == oldFrame.maxX && newFrame.maxY == oldFrame.maxY)

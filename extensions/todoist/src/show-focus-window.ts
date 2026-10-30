@@ -1,7 +1,7 @@
 import { Cache, closeMainWindow, getPreferenceValues, showToast, Toast } from "@raycast/api";
 import { showFailureToast } from "@raycast/utils";
 
-import { showFocusPanel, showPendingFocusPanel } from "./focus/panel";
+import { showExistingFocusPanel, showFocusPanel, showPendingFocusPanel } from "./focus/panel";
 
 export default async function command() {
   try {
@@ -15,8 +15,10 @@ export default async function command() {
       await showToast({ style: Toast.Style.Failure, title: "Velg «Focus Task» på en oppgave først" });
       return;
     }
-    const { focusDuration } = getPreferenceValues<Preferences>();
-    await showFocusPanel(task, Number(focusDuration ?? "25"));
+    if (!(await showExistingFocusPanel(task.id))) {
+      const { focusDuration } = getPreferenceValues<Preferences>();
+      await showFocusPanel(task, Number(focusDuration ?? "25"));
+    }
     await closeMainWindow();
   } catch (error) {
     await showFailureToast(error, { title: "Kunne ikke åpne fokusvinduet" });

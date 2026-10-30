@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Project, Task } from "../api";
+import type { WorkdayPlan } from "../workday/model";
 
 export const TIME_ZONE = "Europe/Oslo";
 export type PlanTask = {
@@ -16,14 +17,23 @@ export type PlanTask = {
   duration?: string;
   overdue: boolean;
 };
-export type PlanSnapshot = {
-  version: 1;
+type SnapshotContent = {
   id: string;
   createdAt: string;
   day: string;
   name: string;
   tasks: PlanTask[];
 };
+export type PlanSnapshot = SnapshotContent &
+  (
+    | { version: 1 }
+    | {
+        version: 2;
+        ordering: "manual";
+        topThree: string[];
+        workday: { accountId: string; day: string; revision: number; entryIds: string[] };
+      }
+  );
 
 export function osloDay(value: Date): string {
   return new Intl.DateTimeFormat("sv-SE", {
@@ -51,7 +61,8 @@ export function dateParts(value: string): { day: string; time?: string } {
   };
 }
 
-export function dailyTasks(tasks: Task[], projects: Project[], userId: string, now = new Date()): PlanTask[] {
+/** All eligible tasks, including undated/future tasks explicitly chosen for a workday. */
+export function planTasks(tasks: Task[], projects: Project[], userId: string, now = new Date()): PlanTask[] {
   const today = osloDay(now);
   const inactive = new Set(projects.filter((p) => p.is_archived || p.is_deleted).map((p) => p.id));
   const byId = new Map(tasks.map((task) => [task.id, task]));
@@ -88,7 +99,6 @@ export function dailyTasks(tasks: Task[], projects: Project[], userId: string, n
       const deadline = t.deadline?.date ? dateParts(t.deadline.date).day : undefined;
       return { t, index, due, deadline };
     })
-    .filter(({ due, deadline }) => (due && due.day <= today) || (deadline && deadline <= today))
     .sort((a, b) => {
       const project = (ranks.get(a.t.project_id) ?? projects.length) - (ranks.get(b.t.project_id) ?? projects.length);
       const overdue = (v: typeof a) => Number(!!((v.due && v.due.day < today) || (v.deadline && v.deadline < today)));
@@ -116,6 +126,55 @@ export function dailyTasks(tasks: Task[], projects: Project[], userId: string, n
       duration: t.duration ? `${t.duration.amount} ${t.duration.unit === "minute" ? "min" : "dager"}` : undefined,
       overdue: !!((due && due.day < today) || (deadline && deadline < today)),
     }));
+}
+
+export function dailyTasks(tasks: Task[], projects: Project[], userId: string, now = new Date()): PlanTask[] {
+  const today = osloDay(now);
+  return planTasks(tasks, projects, userId, now).filter(
+    (task) => (task.due && task.due <= today) || (task.deadline && task.deadline <= today),
+  );
+}
+
+/** Copy the canonical workday order without regrouping projects or nesting children. */
+export function createWorkdaySnapshot(
+  plan: WorkdayPlan,
+  tasks: Task[],
+  projects: Project[],
+  now = new Date(),
+): PlanSnapshot {
+  const byId = new Map(planTasks(tasks, projects, plan.accountId, now).map((task) => [task.id, task]));
+  const entries = plan.entries.filter((entry) => entry.status === "active");
+  if (entries.some((entry) => !byId.has(entry.taskId))) {
+    throw new Error("Arbeidsdagen ble endret under innhentingen. Oppdater og lag forhåndsvisningen på nytt.");
+  }
+  const chosen = entries.map((entry) => byId.get(entry.taskId)!);
+  const legacy = createSnapshot(chosen, new Set(chosen.map((task) => task.id)), now);
+  return {
+    ...legacy,
+    version: 2,
+    day: plan.day,
+    name: legacy.name.replace(legacy.day, plan.day),
+    ordering: "manual",
+    topThree: plan.topThree
+      .map((id) => entries.find((entry) => entry.id === id)?.taskId)
+      .filter((id): id is string => id !== undefined),
+    workday: { accountId: plan.accountId, day: plan.day, revision: plan.revision, entryIds: entries.map((e) => e.id) },
+  };
+}
+
+export function isSnapshotStale(snapshot: PlanSnapshot, plan?: WorkdayPlan): boolean {
+  return (
+    snapshot.version === 2 &&
+    (!plan ||
+      snapshot.workday.accountId !== plan.accountId ||
+      snapshot.workday.day !== plan.day ||
+      snapshot.workday.revision !== plan.revision)
+  );
+}
+
+/** Keep page navigation bounded; reaching the last page must never turn Enter into Send. */
+export function previewPage(current: number, offset: number, count: number): number {
+  return Math.min(Math.max(0, count - 1), Math.max(0, current + offset));
 }
 
 export function createSnapshot(tasks: PlanTask[], selected: Set<string>, now = new Date()): PlanSnapshot {

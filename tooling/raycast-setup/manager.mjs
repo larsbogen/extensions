@@ -148,7 +148,20 @@ export class Manager {
         checks: [],
         node: process.version,
       };
+      let focusVersions;
       try {
+        focusVersions = await json(
+          join(folder, "extensions/todoist/focus-state-versions.json"),
+          [1, 2],
+        );
+        if (
+          !Array.isArray(focusVersions) ||
+          !focusVersions.length ||
+          focusVersions.some(
+            (version) => !Number.isInteger(version) || version < 1,
+          )
+        )
+          throw new Error("Ugyldig kompatibilitetsliste for fokusdata.");
         await this.host.validate(folder, changed, report);
         report.result = "passed";
       } catch (e) {
@@ -158,7 +171,7 @@ export class Manager {
       } finally {
         await save(join(this.root, "reports", id + ".json"), report);
       }
-      return { id, folder, hashes, changed, focusVersions: [1, 2] };
+      return { id, folder, hashes, changed, focusVersions };
     } catch (e) {
       await remove(join(this.config.repositoryPath, "work"), folder);
       throw e;

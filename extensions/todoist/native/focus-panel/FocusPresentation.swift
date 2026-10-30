@@ -4,10 +4,11 @@ import Foundation
 struct FocusPresentation {
     let session: FocusSession
     let completing: Bool
-    var canPause: Bool { !completing }
-    var canExtend: Bool { !completing && session.duration > 0 }
-    var canComplete: Bool { !completing && session.phase != .ended && session.completionDeeplink != nil }
-    var canEnd: Bool { !completing }
+    var canPause: Bool { !completing && session.queueCompleted != true && session.pendingNextRequestId == nil }
+    var canExtend: Bool { canPause && session.duration > 0 }
+    var canNext: Bool { !completing && session.task.queue != nil && session.pendingNextRequestId == nil && session.queueFinished != true }
+    var canComplete: Bool { !completing && session.pendingNextRequestId == nil && session.phase != .ended && session.completionDeeplink != nil }
+    var canEnd: Bool { !completing && session.pendingNextRequestId == nil }
     var pauseTitle: String {
         switch session.phase {
         case .running: return "Pause"

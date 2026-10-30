@@ -41,6 +41,36 @@
   ],
   "commands": [
     {
+      "name": "my-workday",
+      "title": "Min arbeidsdag",
+      "subtitle": "Todoist",
+      "description": "Velg dagens oppgaver, marker topp tre og start fokuskøen.",
+      "mode": "view",
+      "platforms": [
+        "macOS"
+      ]
+    },
+    {
+      "name": "work-overview",
+      "title": "Arbeidsoversikt",
+      "subtitle": "Todoist",
+      "description": "Se dags- og ukeoversikt over fokustid og Todoist-fullføringer.",
+      "mode": "view",
+      "platforms": [
+        "macOS"
+      ]
+    },
+    {
+      "name": "next-focus-task",
+      "title": "Next Focus Task",
+      "subtitle": "Todoist",
+      "description": "Start the next workday task requested by the floating focus card.",
+      "mode": "no-view",
+      "platforms": [
+        "macOS"
+      ]
+    },
+    {
       "name": "create-task-from-outlook",
       "title": "Create Task from Outlook",
       "subtitle": "Todoist",
@@ -61,6 +91,10 @@
           "name": "view",
           "type": "dropdown",
           "data": [
+            {
+              "title": "Min arbeidsdag",
+              "value": "workday"
+            },
             {
               "title": "Inbox",
               "value": "inbox"

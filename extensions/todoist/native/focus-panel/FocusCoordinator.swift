@@ -79,6 +79,8 @@ final class FocusCoordinator {
 
     func restore() {
         snapshot.session?.restore()
+        // A command from the old process must not advance a recovered session.
+        snapshot.session?.pendingNextRequestId = nil
         snapshot.tracking.takeover?.resumeOnSuccess = false
         for index in snapshot.tracking.periods.indices {
             if snapshot.tracking.periods[index].sync == .creating {
@@ -142,9 +144,10 @@ final class FocusCoordinator {
             description: description, sync: enabled ? .pending : .local))
     }
 
-    @discardableResult func start(task: FocusTask, duration: Double) -> Bool {
+    @discardableResult func start(task: FocusTask, duration: Double, originRequestId: String? = nil) -> Bool {
         advance()
-        if snapshot.session?.task.id == task.id && snapshot.session?.phase != .ended {
+        if snapshot.session?.task.id == task.id && snapshot.session?.task.queue?.entryId == task.queue?.entryId &&
+            snapshot.session?.task.todoistUserId == task.todoistUserId && snapshot.session?.phase != .ended {
             snapshot.session?.task = task
         } else {
             closePeriod()
@@ -153,6 +156,7 @@ final class FocusCoordinator {
             snapshot.session?.togglEnabled = enabled
             openPeriod()
         }
+        snapshot.session?.originRequestId = originRequestId
         resetClock()
         let saved = persist()
         if saved { requestSync() }
@@ -179,9 +183,18 @@ final class FocusCoordinator {
         snapshot.tracking.takeover?.resumeOnSuccess = false
         return editSession { $0.pause() }
     }
-    @discardableResult func end() -> Bool {
+    @discardableResult func end(clearQueue: Bool = false) -> Bool {
         snapshot.tracking.takeover?.resumeOnSuccess = false
-        return editSession { $0.end() }
+        return editSession { session in
+            session.end()
+            if clearQueue {
+                session.task.queue = nil
+                session.task.nextURL = nil
+                session.pendingNextRequestId = nil
+                session.queueCompleted = nil
+                session.queueFinished = nil
+            }
+        }
     }
     func togglePause() {
         guard storageError == nil || persist() else { return }

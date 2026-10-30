@@ -1,5 +1,14 @@
 # Todoist Changelog
 
+## Shared workday, focus queue, work reports and inline PDF preview - {PR_MERGE_DATE}
+
+- Add Min arbeidsdag as a command and My Tasks view, with a persistent account/day selection, manual order, independent top-three highlights and explicit carry-forward.
+- Use the same ordered plan for the focus queue and reMarkable export; preserve standalone focus sessions and start the next queued task only after an explicit action.
+- Add daily/weekly local focus-time and personal Todoist completion reports, with full activity pagination, recurring completion counts, project filtering and visible data-coverage limits.
+- Show validated PDF page images inside Raycast, with separate page navigation, external-open and send actions; retain hash-checked preview images and recover missing legacy caches locally.
+- Preserve older PDF jobs; migrate focus state to version 3 with a byte-for-byte backup, retaining history and pending Toggl work.
+- Extend unattended tests for concurrency, recurrence, time boundaries, migration, PDF order/layout and preview recovery without using real accounts or desktop UI automation.
+
 ## Compact focus window - {PR_MERGE_DATE}
 
 - Default to a compact floating card with pause/resume and an action menu; remember the selected view and separate sizes.

@@ -53,6 +53,7 @@ import { ViewMode, getTaskAppUrl, getTaskUrl } from "../helpers/tasks";
 import { QuickLinkView } from "../home";
 import { useFocusedTask } from "../hooks/useFocusedTask";
 import { ViewProps } from "../hooks/useViewTasks";
+import { addToToday } from "../workday/service";
 
 import CreateViewActions from "./CreateViewActions";
 import LazySubmenu from "./LazySubmenu";
@@ -284,6 +285,18 @@ export default function TaskActions({
       <Action title="Complete Task" icon={Icon.Checkmark} onAction={() => completeTask(task)} />
       <OpenInTodoist appUrl={getTaskAppUrl(task.id)} webUrl={getTaskUrl(task.id)} />
       <ActionPanel.Section>
+        <Action
+          title="Legg Til I Arbeidsdagen"
+          icon={Icon.Plus}
+          onAction={async () => {
+            try {
+              await addToToday(task.id);
+              await showToast({ style: Toast.Style.Success, title: "Lagt til i arbeidsdagen" });
+            } catch (error) {
+              await showFailureToast(error, { title: "Kunne ikke legge til i arbeidsdagen" });
+            }
+          }}
+        />
         {focusedTask.id !== task.id ? (
           <Action
             title="Focus Task"

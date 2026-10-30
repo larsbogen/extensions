@@ -11,6 +11,8 @@ import {
   Icon,
   List,
   LocalStorage,
+  launchCommand,
+  LaunchType,
   open,
   openCommandPreferences,
   showToast,
@@ -19,10 +21,20 @@ import {
 } from "@raycast/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { initialSync } from "./api";
 import { withTodoistApi } from "./helpers/withTodoistApi";
 import { createPlanPdf } from "./remarkable/pdf";
-import { createSnapshot, dailyTasks, type PlanTask } from "./remarkable/plan";
+import {
+  createWorkdaySnapshot,
+  isSnapshotStale,
+  osloDay,
+  planTasks,
+  previewPage,
+  type PlanTask,
+} from "./remarkable/plan";
+import { reconcilePlan, type WorkdayPlan } from "./workday/model";
+import { getWorkdayStore } from "./workday/runtime";
 import {
   DailyPlanService,
   shouldResumePreview,
@@ -191,112 +203,129 @@ export function DailyPlanCommand() {
     [prefs.rm2Path, prefs.pdfinfoPath, prefs.pdftoppmPath],
   );
   const [tasks, setTasks] = useState<PlanTask[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [plan, setPlan] = useState<WorkdayPlan>();
   const [folder, setFolder] = useState<Folder>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [stage, setStage] = useState<JobState>();
   const [job, setJob] = useState<ExportJob>();
   const [latest, setLatest] = useState<ExportJob>();
-  const [search, setSearch] = useState("");
+  const [pages, setPages] = useState<string[]>([]);
+  const [page, setPage] = useState(0);
+  const [previewError, setPreviewError] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
   const busy = useRef(false);
+  const previewRequest = useRef(0);
 
   const fetchFresh = useCallback(async () => {
+    const observedAt = new Date().toISOString();
     const data = await initialSync(["user", "projects", "items"]);
     if (!data.user?.id || !Array.isArray(data.items) || !Array.isArray(data.projects))
       throw new Error("Todoist returnerte ufullstendige data.");
-    return dailyTasks(data.items, data.projects, data.user.id);
+    const store = getWorkdayStore();
+    const day = osloDay(new Date());
+    const existing = await store.read(data.user.id, day);
+    const current = existing
+      ? await store.update(data.user.id, day, (value) =>
+          reconcilePlan(value, data.items!, data.projects!, data.user!.id, [], observedAt),
+        )
+      : undefined;
+    const byId = new Map(planTasks(data.items, data.projects, data.user.id).map((task) => [task.id, task]));
+    const chosen =
+      current?.entries
+        .filter((entry) => entry.status === "active")
+        .flatMap((entry) => (byId.has(entry.taskId) ? [byId.get(entry.taskId)!] : [])) ?? [];
+    setPlan(current);
+    setTasks(chosen);
+    return { data, plan: current };
   }, []);
   const reload = useCallback(async () => {
     if (busy.current) return;
     setLoading(true);
     setError("");
-    setTasks([]);
-    setSelected(new Set());
-    setJob(undefined);
     try {
       const fresh = await fetchFresh();
-      setTasks(fresh);
-      setSelected(new Set(fresh.map((t) => t.id)));
-    } catch {
-      setError("Kunne ikke hente ferske oppgaver fra Todoist. Kontroller tilkobling og innlogging, og prøv igjen.");
+      const saved = await service.latest(fresh.data.user!.id).catch(() => undefined);
+      const compatible =
+        saved && (saved.snapshot.version === 1 || saved.snapshot.workday.accountId === fresh.data.user!.id)
+          ? saved
+          : undefined;
+      setLatest(compatible);
+      return compatible;
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
-  }, [fetchFresh]);
+  }, [fetchFresh, service]);
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      const [, saved] = await Promise.all([reload(), service.latest().catch(() => undefined)]);
-      if (cancelled) return;
-      setLatest(saved);
-      if (shouldResumePreview(saved)) setJob(saved);
-    })();
+    void reload().then((saved) => {
+      if (!cancelled && shouldResumePreview(saved) && saved.snapshot.version === 2) setJob(saved);
+    });
     void LocalStorage.getItem<string>(FOLDER_KEY).then((raw) => {
-      if (raw) {
-        try {
-          const stored = JSON.parse(raw);
-          if (typeof stored.id === "string" && typeof stored.name === "string") setFolder(stored);
-        } catch {
-          /* choose again */
-        }
+      if (!raw || cancelled) return;
+      try {
+        const stored = JSON.parse(raw);
+        if (typeof stored.id === "string" && typeof stored.name === "string") setFolder(stored);
+      } catch {
+        /* choose again */
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [reload, service]);
+  }, [reload]);
+  const loadPreview = useCallback(
+    async (value: ExportJob) => {
+      const request = ++previewRequest.current;
+      setPreviewLoading(true);
+      setPreviewError("");
+      try {
+        const rendered = await service.previewPages(value.id);
+        if (request === previewRequest.current) setPages(rendered);
+      } catch (e) {
+        if (request === previewRequest.current) {
+          setPages([]);
+          setPreviewError(errorMessage(e));
+        }
+      } finally {
+        if (request === previewRequest.current) setPreviewLoading(false);
+      }
+    },
+    [service],
+  );
+  useEffect(() => {
+    setPage(0);
+    setPages([]);
+    if (job) void loadPreview(job);
+    return () => {
+      previewRequest.current++;
+    };
+  }, [job?.id, loadPreview]);
   const chooseFolder = async (value: Folder) => {
     await LocalStorage.setItem(FOLDER_KEY, JSON.stringify(value));
     setFolder(value);
     setJob(undefined);
   };
-  const changeSelection = (value: Set<string>) => {
-    if (!busy.current) {
-      setSelected(value);
-      setJob(undefined);
-    }
-  };
-  const toggle = (id: string) => {
-    const next = new Set(selected);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    changeSelection(next);
-  };
-  async function openPreview(value: ExportJob) {
-    try {
-      await open(service.pdfPath(value));
-      if (value.state === "ready") {
-        await showToast({
-          style: Toast.Style.Success,
-          title: "PDF klar – ikke sendt ennå",
-          message: "Gå tilbake til Raycast og trykk Enter for å sende til reMarkable.",
-        });
-      }
-    } catch {
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "Kunne ikke åpne PDF",
-        message: "Velg Åpne forhåndsvisning for å prøve igjen.",
-      });
-    }
-  }
+  const editWorkday = () =>
+    launchCommand({
+      name: "my-workday",
+      type: LaunchType.UserInitiated,
+      context: { pickTasks: !plan || tasks.length === 0 },
+    });
   async function preview() {
-    if (busy.current || !folder || selected.size === 0 || loading || error) return;
+    if (busy.current || !folder || loading) return;
     busy.current = true;
-    setStage(undefined);
     setLoading(true);
-    setError("");
+    setStage("exporting");
     try {
       const fresh = await fetchFresh();
-      setTasks(fresh);
-      const kept = new Set(fresh.filter((t) => selected.has(t.id)).map((t) => t.id));
-      setSelected(kept);
-      const snapshot = createSnapshot(fresh, kept);
+      if (!fresh.plan) throw new Error("Velg oppgaver i Min arbeidsdag før du lager dagsplanen.");
+      const snapshot = createWorkdaySnapshot(fresh.plan, fresh.data.items!, fresh.data.projects!);
       const exported = await service.export(snapshot, folder, setStage);
       setJob(exported);
       setLatest(exported);
-      await openPreview(exported);
     } catch (e) {
       setStage("error");
       await showToast({ style: Toast.Style.Failure, title: "Kunne ikke lage dagsplan", message: errorMessage(e) });
@@ -320,72 +349,89 @@ export function DailyPlanCommand() {
         message: result.documentId ?? result.error,
       });
     } catch (e) {
-      // A durable "sending" state is also treated as uncertain after interruption.
       const saved = await service.load(job.id).catch(() => undefined);
       if (saved) {
         setJob(saved);
         setStage(saved.state);
-      } else {
-        setStage("error");
-      }
+      } else setStage("error");
       await showToast({ style: Toast.Style.Failure, title: "Sending stoppet", message: errorMessage(e) });
     } finally {
       busy.current = false;
     }
   }
   if (job) {
-    const active = stage === "sending" && busy.current;
-    const uncertain = job.state === "uncertain" || (job.state === "sending" && !active);
-    const title = active ? STATE_LABELS.sending : uncertain ? "Sending ikke bekreftet" : STATE_LABELS[job.state];
-    const summary = [
-      `# ${title}`,
-      "",
-      job.snapshot.name,
-      "",
-      `**${job.snapshot.tasks.length} oppgaver · ${job.pages} sider**`,
-      "",
-      `Mappe: ${job.folder.name}`,
-      ...(job.state === "ready"
-        ? [
-            "",
-            "**PDF-en er laget, men er ikke sendt til reMarkable.**",
-            "",
-            "Trykk **Enter** her i Raycast for å sende denne PDF-en til målmappen. " +
-              "Du kan åpne forhåndsvisningen igjen fra handlingsmenyen (⌘K).",
-          ]
-        : []),
-      "",
+    const sending = stage === "sending" && busy.current;
+    const uncertain = job.state === "uncertain" || (job.state === "sending" && !sending);
+    const stale = isSnapshotStale(job.snapshot, plan);
+    const title = sending ? STATE_LABELS.sending : uncertain ? "Sending ikke bekreftet" : STATE_LABELS[job.state];
+    const currentPage = Math.min(page, Math.max(0, pages.length - 1));
+    const markdown = [
+      `**${title} · Side ${currentPage + 1} av ${job.pages}**`,
+      `Mappe: ${job.folder.name} · ${job.snapshot.tasks.length} oppgaver`,
+      ...(stale ? ["**Arbeidsdagen er endret. Lag en ny forhåndsvisning for å ta med endringene.**"] : []),
+      ...(previewError ? [previewError] : []),
+      ...(pages[currentPage] ? [`![Side ${currentPage + 1}](<${pathToFileURL(pages[currentPage]).href}>)`] : []),
       "PDF-en er et frosset øyeblikksbilde. Avkrysninger og notater synkroniseres ikke til Todoist.",
-      ...(job.documentId ? ["", `Dokument-ID: \`${job.documentId}\``] : []),
-      ...(job.state === "sent"
-        ? ["", "Åpne målmappen på reMarkable. Nettbrettet må være tilkoblet og ha synkronisert for å vise dokumentet."]
-        : []),
-      ...(uncertain
-        ? ["", "Kontroller reMarkable før du lager en ny eksport. Dokumentet kan allerede være sendt."]
-        : []),
-      ...(job.error ? ["", job.error] : []),
-    ].join("\n");
+      ...(uncertain ? ["Kontroller reMarkable før du lager en ny eksport. Dokumentet kan allerede være sendt."] : []),
+      ...(job.error ? [job.error] : []),
+    ].join("\n\n");
     return (
       <Detail
-        isLoading={active}
-        navigationTitle="Dagsplan til reMarkable"
-        markdown={summary}
+        isLoading={sending || previewLoading}
+        navigationTitle={`Dagsplan · Side ${currentPage + 1} av ${job.pages}`}
+        markdown={markdown}
         actions={
-          active ? undefined : (
+          sending ? undefined : (
             <ActionPanel>
-              {job.state === "ready" ? <Action title="Send Til reMarkable" icon={Icon.Upload} onAction={send} /> : null}
-              <Action title="Åpne Forhåndsvisning" icon={Icon.Document} onAction={() => openPreview(job)} />
               <Action
-                title="Tilbake Til Oppgavevalg"
-                icon={Icon.List}
-                onAction={() => {
-                  setJob(undefined);
-                  setStage(undefined);
-                }}
+                title="Neste Side"
+                icon={Icon.ArrowRight}
+                shortcut={{ modifiers: ["cmd"], key: "arrowRight" }}
+                onAction={() => setPage(previewPage(currentPage, 1, pages.length))}
               />
-              <Action.ShowInFinder title="Vis Eksportfiler" path={service.pdfPath(job)} />
-              {job.documentId ? <Action.CopyToClipboard title="Kopier Dokument-ID" content={job.documentId} /> : null}
-              <Action.CopyToClipboard title="Kopier Kommando for Opplastingsinnlogging" content="rm2 cloud login" />
+              {currentPage > 0 ? (
+                <Action
+                  title="Forrige Side"
+                  icon={Icon.ArrowLeft}
+                  shortcut={{ modifiers: ["cmd"], key: "arrowLeft" }}
+                  onAction={() => setPage(previewPage(currentPage, -1, pages.length))}
+                />
+              ) : null}
+              <ActionPanel.Section title="Dokument">
+                {job.state === "ready" ? (
+                  <Action
+                    title="Send Til reMarkable"
+                    icon={Icon.Upload}
+                    shortcut={{ modifiers: ["cmd", "shift"], key: "return" }}
+                    onAction={send}
+                  />
+                ) : null}
+                {previewError ? (
+                  <Action
+                    title="Last Forhåndsvisningen På Nytt"
+                    icon={Icon.ArrowClockwise}
+                    onAction={() => loadPreview(job)}
+                  />
+                ) : null}
+                <Action title="Åpne PDF Eksternt" icon={Icon.Document} onAction={() => open(service.pdfPath(job))} />
+                <Action
+                  title="Kontroller Arbeidsdagen"
+                  icon={Icon.ArrowClockwise}
+                  shortcut={{ modifiers: ["cmd"], key: "r" }}
+                  onAction={reload}
+                />
+                <Action
+                  title="Tilbake Til Arbeidsdagen"
+                  icon={Icon.List}
+                  onAction={() => {
+                    setJob(undefined);
+                    setStage(undefined);
+                    void reload();
+                  }}
+                />
+                <Action.ShowInFinder title="Vis Eksportfiler" path={service.pdfPath(job)} />
+                {job.documentId ? <Action.CopyToClipboard title="Kopier Dokument-ID" content={job.documentId} /> : null}
+              </ActionPanel.Section>
             </ActionPanel>
           )
         }
@@ -394,7 +440,7 @@ export function DailyPlanCommand() {
   }
   const commonActions = () => (
     <>
-      {folder && selected.size > 0 && !loading && !error ? (
+      {folder && tasks.length > 0 && !loading && !error ? (
         <Action
           title="Lag Forhåndsvisning"
           icon={Icon.Document}
@@ -402,18 +448,26 @@ export function DailyPlanCommand() {
           onAction={preview}
         />
       ) : null}
+      <Action
+        title={plan ? "Rediger Min Arbeidsdag" : "Velg Oppgaver Til Arbeidsdagen"}
+        icon={Icon.List}
+        onAction={editWorkday}
+      />
       <Action.Push
         title={folder ? "Endre Målmappe" : "Velg Målmappe"}
         icon={Icon.Folder}
         target={<FolderPicker service={service} onChoose={chooseFolder} />}
       />
-      <Action title="Velg Alle Oppgaver" onAction={() => changeSelection(new Set(tasks.map((t) => t.id)))} />
-      <Action title="Fjern Alle Valg" onAction={() => changeSelection(new Set())} />
-      <Action title="Hent Ferske Oppgaver" icon={Icon.ArrowClockwise} onAction={reload} />
+      <Action
+        title="Hent Arbeidsdagen På Nytt"
+        icon={Icon.ArrowClockwise}
+        shortcut={{ modifiers: ["cmd"], key: "r" }}
+        onAction={reload}
+      />
       {latest ? (
         <Action
           title="Åpne Siste Eksport"
-          onAction={async () => {
+          onAction={() => {
             setJob(latest);
             setStage(latest.state);
           }}
@@ -422,61 +476,35 @@ export function DailyPlanCommand() {
       <Action title="Åpne Innstillinger" onAction={openCommandPreferences} />
     </>
   );
-  if (busy.current)
-    return (
-      <Detail
-        isLoading
-        markdown={`# ${stage ? STATE_LABELS[stage] : "Henter ferske oppgaver …"}\n\nVent til forhåndsvisningen er klar.`}
-      />
-    );
-  const visible = tasks.filter((t) =>
-    `${t.title} ${t.projectName} ${t.parentTitle ?? ""}`
-      .toLocaleLowerCase("nb")
-      .includes(search.toLocaleLowerCase("nb")),
-  );
-  const groups = [...new Set(visible.map((t) => t.projectId))];
+  if (busy.current) return <Detail isLoading markdown={`# ${stage ? STATE_LABELS[stage] : "Henter arbeidsdagen …"}`} />;
   return (
     <List
       isLoading={loading}
-      filtering={false}
-      searchText={search}
-      onSearchTextChange={setSearch}
-      navigationTitle={`Dagsplan · ${selected.size} valgt${folder ? ` · ${folder.name}` : " · velg målmappe"}`}
-      searchBarPlaceholder="Søk i dagens og forfalte oppgaver"
+      navigationTitle={`Dagsplan · ${tasks.length} oppgaver${folder ? ` · ${folder.name}` : " · velg målmappe"}`}
+      searchBarPlaceholder="Søk i arbeidsdagens valgte oppgaver"
     >
       <List.EmptyView
-        title={error ? "Kunne ikke hente oppgaver" : "Ingen oppgaver"}
-        description={error || "Ingen oppgaver passer til dagens dato og søk."}
+        title={error ? "Kunne ikke hente arbeidsdagen" : "Velg oppgaver i Min arbeidsdag"}
+        description={error || "Dagsplanen bruker samme utvalg, topp tre og rekkefølge som arbeidsdagen og fokuskøen."}
         actions={<ActionPanel>{commonActions()}</ActionPanel>}
       />
-      {groups.map((id) => (
-        <List.Section key={id} title={visible.find((t) => t.projectId === id)?.projectName}>
-          {visible
-            .filter((t) => t.projectId === id)
-            .map((t) => (
-              <List.Item
-                key={t.id}
-                title={t.title}
-                subtitle={t.parentTitle}
-                icon={selected.has(t.id) ? { source: Icon.CheckCircle, tintColor: Color.Green } : Icon.Circle}
-                accessories={[
-                  ...(t.overdue ? [{ tag: { value: "Forfalt", color: Color.Red } }] : []),
-                  { text: `P${t.priority}` },
-                  ...(t.dueTime ? [{ text: t.dueTime }] : []),
-                ]}
-                actions={
-                  <ActionPanel>
-                    <Action
-                      title={selected.has(t.id) ? "Ta Ut Av Dagsplanen" : "Ta Med I Dagsplanen"}
-                      onAction={() => toggle(t.id)}
-                    />
-                    {commonActions()}
-                  </ActionPanel>
-                }
-              />
-            ))}
-        </List.Section>
-      ))}
+      {tasks.map((task, index) => {
+        const entry = plan?.entries.find((entry) => entry.status === "active" && entry.taskId === task.id);
+        const top = entry ? plan?.topThree.indexOf(entry.id) : -1;
+        return (
+          <List.Item
+            key={entry?.id ?? task.id}
+            title={`${index + 1}. ${task.title}`}
+            subtitle={task.projectName}
+            icon={top !== undefined && top >= 0 ? Icon.Star : Icon.Circle}
+            accessories={[
+              ...(task.overdue ? [{ tag: { value: "Forfalt", color: Color.Red } }] : []),
+              ...(task.dueTime ? [{ text: task.dueTime }] : []),
+            ]}
+            actions={<ActionPanel>{commonActions()}</ActionPanel>}
+          />
+        );
+      })}
     </List>
   );
 }

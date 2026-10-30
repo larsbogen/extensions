@@ -130,8 +130,21 @@ export function validatePdfInfo(output: string, expectedPages?: number): number 
   return pages;
 }
 
+function validatePng(bytes: Buffer): void {
+  if (
+    bytes.length < 45 ||
+    !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
+    bytes.toString("ascii", 12, 16) !== "IHDR" ||
+    bytes.readUInt32BE(16) === 0 ||
+    bytes.readUInt32BE(20) === 0 ||
+    bytes.toString("ascii", bytes.length - 8, bytes.length - 4) !== "IEND"
+  )
+    throw new Error("En PDF-side kunne ikke rendres som PNG.");
+}
+
 export class DailyPlanService {
-  private latestRead?: Promise<ExportJob | undefined>;
+  private latestReads = new Map<string, Promise<ExportJob | undefined>>();
+  private previewReads = new Map<string, Promise<string[]>>();
   constructor(
     readonly root: string,
     readonly prefs: ToolPreferences,
@@ -153,7 +166,14 @@ export class DailyPlanService {
   }
   async load(id: string): Promise<ExportJob> {
     const job = JSON.parse(await readFile(path.join(this.directory(id), "job.json"), "utf8")) as ExportJob;
-    if (job.version !== 1 || job.id !== id || !UUID.test(job.folder.id)) throw new Error("Ugyldig lagret eksportjobb.");
+    if (
+      job.version !== 1 ||
+      job.id !== id ||
+      !UUID.test(job.folder.id) ||
+      ![1, 2].includes(job.snapshot?.version) ||
+      !Array.isArray(job.snapshot?.tasks)
+    )
+      throw new Error("Ugyldig lagret eksportjobb.");
     return job;
   }
   private async locked<T>(action: () => Promise<T>): Promise<T> {
@@ -339,7 +359,6 @@ export class DailyPlanService {
         if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
       }
       await this.save(job);
-      const rendered = path.join(directory, "rendered");
       try {
         onState("exporting");
         const tools = await resolveTools(this.prefs);
@@ -357,46 +376,102 @@ export class DailyPlanService {
         const allPages = await this.run(tools.pdfinfo, ["-f", "1", "-l", String(pages), pdf], { env });
         if (allPages.code !== 0) throw new Error("PDF-sidene kunne ikke valideres.");
         validatePdfInfo(allPages.stdout, pages);
-        await mkdir(rendered, { recursive: true });
-        const renderedResult = await this.run(tools.pdftoppm, ["-png", "-r", "130", pdf, path.join(rendered, "page")], {
-          env,
-          timeoutMs: 180_000,
-        });
-        if (renderedResult.code !== 0) throw new Error("Ikke alle PDF-sidene kunne rendres.");
-        const files = (await readdir(rendered)).filter((name) => /^page-\d+\.png$/.test(name));
-        const indices = files.map((name) => Number(name.match(/\d+/)?.[0])).sort((a, b) => a - b);
-        if (indices.length !== pages || indices.some((n, i) => n !== i + 1))
-          throw new Error("Det mangler renderte PDF-sider.");
-        for (const file of files) {
-          const bytes = await readFile(path.join(rendered, file));
-          if (
-            bytes.length < 45 ||
-            !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
-            bytes.toString("ascii", 12, 16) !== "IHDR" ||
-            bytes.readUInt32BE(16) === 0 ||
-            bytes.readUInt32BE(20) === 0 ||
-            bytes.toString("ascii", bytes.length - 8, bytes.length - 4) !== "IEND"
-          )
-            throw new Error("En PDF-side kunne ikke rendres som PNG.");
-        }
         job.pdfHash = createHash("sha256")
           .update(await readFile(pdf))
           .digest("hex");
         job.pages = pages;
+        await this.renderImages(job, tools);
         job.state = "ready";
         await this.save(job);
         onState("ready");
         return job;
       } catch (error) {
+        await rm(path.join(directory, "preview"), { recursive: true, force: true });
         job.state = "error";
         job.error = error instanceof Error ? error.message : "Eksporten mislyktes.";
         await this.save(job);
         onState("error");
         throw new Error(job.error);
-      } finally {
-        await rm(rendered, { recursive: true, force: true });
       }
     });
+  }
+  private async renderImages(job: ExportJob, tools: Tools): Promise<string[]> {
+    const directory = this.directory(job.id);
+    const temporary = path.join(directory, "rendered");
+    const preview = path.join(directory, "preview");
+    await rm(temporary, { recursive: true, force: true });
+    await mkdir(temporary, { recursive: true, mode: 0o700 });
+    try {
+      const result = await this.run(
+        tools.pdftoppm,
+        ["-png", "-r", "130", this.pdfPath(job), path.join(temporary, "page")],
+        { env: this.environment(), timeoutMs: 180_000 },
+      );
+      if (result.code !== 0) throw new Error("Ikke alle PDF-sidene kunne rendres.");
+      const files = await this.imageFiles(temporary, job.pages);
+      const hashes = await Promise.all(
+        files.map(async (name) => {
+          const bytes = await readFile(path.join(temporary, name));
+          validatePng(bytes);
+          return { name, hash: createHash("sha256").update(bytes).digest("hex") };
+        }),
+      );
+      await writeFile(path.join(temporary, "manifest.json"), JSON.stringify({ pdfHash: job.pdfHash, pages: hashes }), {
+        mode: 0o600,
+      });
+      await rm(preview, { recursive: true, force: true });
+      await rename(temporary, preview);
+      return files.map((file) => path.join(preview, file));
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  }
+  private async imageFiles(directory: string, pages: number): Promise<string[]> {
+    const files = (await readdir(directory)).filter((name) => /^page-\d+\.png$/.test(name));
+    files.sort((a, b) => Number(a.match(/\d+/)?.[0]) - Number(b.match(/\d+/)?.[0]));
+    if (files.length !== pages || files.some((name, index) => Number(name.match(/\d+/)?.[0]) !== index + 1))
+      throw new Error("Det mangler renderte PDF-sider.");
+    return files;
+  }
+  /** Read or restore a local image cache; never changes the PDF, upload state or snapshot. */
+  previewPages(id: string): Promise<string[]> {
+    const pending = this.previewReads.get(id);
+    if (pending) return pending;
+    const operation = this.locked(async () => {
+      const job = await this.load(id);
+      if (!job.pages || !job.pdfHash) throw new Error("Eksporten har ingen validert PDF-forhåndsvisning.");
+      const hash = createHash("sha256")
+        .update(await readFile(this.pdfPath(job)))
+        .digest("hex");
+      if (hash !== job.pdfHash) throw new Error("PDF-en er endret etter forhåndsvisningen. Lag en ny forhåndsvisning.");
+      const preview = path.join(this.directory(id), "preview");
+      try {
+        const manifest = JSON.parse(await readFile(path.join(preview, "manifest.json"), "utf8"));
+        if (manifest.pdfHash !== hash || !Array.isArray(manifest.pages)) throw new Error("Utdatert bildecache.");
+        const files = await this.imageFiles(preview, job.pages);
+        if (manifest.pages.length !== files.length) throw new Error("Ufullstendig bildecache.");
+        await Promise.all(
+          files.map(async (name, index) => {
+            const bytes = await readFile(path.join(preview, name));
+            validatePng(bytes);
+            const expected = manifest.pages[index];
+            if (expected?.name !== name || expected.hash !== createHash("sha256").update(bytes).digest("hex"))
+              throw new Error("Ugyldig bildecache.");
+          }),
+        );
+        return files.map((file) => path.join(preview, file));
+      } catch {
+        const tools = await resolveTools(this.prefs);
+        const info = await this.run(tools.pdfinfo, ["-f", "1", "-l", String(job.pages), this.pdfPath(job)], {
+          env: this.environment(),
+        });
+        if (info.code !== 0) throw new Error("PDF-sidene kunne ikke valideres.");
+        validatePdfInfo(info.stdout, job.pages);
+        return await this.renderImages(job, tools);
+      }
+    }).finally(() => this.previewReads.delete(id));
+    this.previewReads.set(id, operation);
+    return operation;
   }
   async send(id: string): Promise<ExportJob> {
     return this.locked(async () => {
@@ -444,16 +519,19 @@ export class DailyPlanService {
       return job;
     });
   }
-  latest(): Promise<ExportJob | undefined> {
+  latest(accountId?: string): Promise<ExportJob | undefined> {
     // React can run initialization twice. Share that read instead of treating
     // the second initialization as a competing export job.
-    if (this.latestRead) return this.latestRead;
-    this.latestRead = this.locked(async () => {
+    const key = accountId ?? "";
+    const pending = this.latestReads.get(key);
+    if (pending) return pending;
+    const operation = this.locked(async () => {
       const jobs: ExportJob[] = [];
       for (const entry of await readdir(this.root)) {
         if (!UUID.test(entry)) continue;
         try {
           const job = await this.load(entry);
+          if (accountId && job.snapshot.version === 2 && job.snapshot.workday.accountId !== accountId) continue;
           if (Date.now() - Date.parse(job.createdAt) < SEVEN_DAYS && job.pages) jobs.push(job);
         } catch {
           /* ignore incomplete jobs */
@@ -461,8 +539,9 @@ export class DailyPlanService {
       }
       return jobs.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
     }).finally(() => {
-      this.latestRead = undefined;
+      this.latestReads.delete(key);
     });
-    return this.latestRead;
+    this.latestReads.set(key, operation);
+    return operation;
   }
 }

@@ -1,16 +1,35 @@
 import Foundation
 
+struct FocusQueueContext: Codable, Equatable {
+    var accountId: String
+    var day: String
+    var entryId: String
+    var revision: Int
+}
+
 struct FocusTask: Codable {
     var id: String
     var title: String
     var url: String
     var completionURL: String?
     var projectId: String?
+    var projectName: String?
+    var todoistUserId: String?
+    var queue: FocusQueueContext?
+    var nextURL: String?
 }
 
 struct FocusCompletionResult: Codable {
     var sessionId: String
     var success: Bool
+    var error: String?
+}
+
+struct FocusNextResult: Codable {
+    var sessionId: String
+    var requestId: String
+    var success: Bool
+    var empty: Bool?
     var error: String?
 }
 
@@ -21,6 +40,9 @@ struct FocusRequest: Codable {
     var duration: Double?
     var taskId: String?
     var sessionId: String?
+    var transitionRequestId: String?
+    var expiresAt: Double?
+    var automatic: Bool?
 }
 
 enum FocusPhase: String, Codable {
@@ -36,6 +58,10 @@ struct FocusSession: Codable {
     var elapsed: Double = 0
     var phase: FocusPhase = .running
     var togglEnabled: Bool?
+    var originRequestId: String?
+    var pendingNextRequestId: String?
+    var queueFinished: Bool?
+    var queueCompleted: Bool?
 
     init(task: FocusTask, duration: Double) {
         self.task = task
@@ -56,6 +82,20 @@ struct FocusSession: Codable {
             $0.name != "context" && $0.name != "launchContext"
         } + [URLQueryItem(name: "context", value: json)]
         return components.url
+    }
+
+    func nextDeeplink(requestId: String) -> URL? {
+        guard task.queue != nil, let string = task.nextURL,
+              var components = URLComponents(string: string), components.scheme?.hasPrefix("raycast") == true,
+              let data = try? JSONEncoder().encode(["sessionId": id, "requestId": requestId]),
+              let json = String(data: data, encoding: .utf8) else { return nil }
+        components.queryItems = (components.queryItems ?? []).filter { $0.name != "context" && $0.name != "launchContext" }
+            + [URLQueryItem(name: "context", value: json)]
+        return components.url
+    }
+
+    func acceptsTransition(_ request: FocusRequest) -> Bool {
+        request.sessionId == id && request.transitionRequestId != nil && request.transitionRequestId == pendingNextRequestId
     }
 
     mutating func advance(by seconds: Double) {
@@ -144,13 +184,14 @@ struct FocusAppearance: Codable {
 }
 
 struct FocusSnapshot: Codable {
-    var version = 2
+    var version = 3
     var session: FocusSession?
     var appearance = FocusAppearance()
     var requestId = ""
     var updatedAt = Date().timeIntervalSince1970
     var tracking = TrackingState()
     var acknowledgedRequests: [String] = []
+    var undatedLegacySeconds: Double?
 
     init(session: FocusSession? = nil, appearance: FocusAppearance = FocusAppearance()) {
         self.session = session
@@ -167,11 +208,11 @@ struct FocusSnapshot: Codable {
         requestId = id
     }
 
-    enum CodingKeys: String, CodingKey { case version, session, appearance, requestId, updatedAt, tracking, acknowledgedRequests }
+    enum CodingKeys: String, CodingKey { case version, session, appearance, requestId, updatedAt, tracking, acknowledgedRequests, undatedLegacySeconds }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let version = try values.decode(Int.self, forKey: .version)
-        guard version == 1 || version == 2 else {
+        guard (1...3).contains(version) else {
             throw DecodingError.dataCorruptedError(forKey: .version, in: values, debugDescription: "Ukjent fokusversjon")
         }
         session = try values.decodeIfPresent(FocusSession.self, forKey: .session)
@@ -181,7 +222,13 @@ struct FocusSnapshot: Codable {
         tracking = try values.decodeIfPresent(TrackingState.self, forKey: .tracking) ?? TrackingState()
         acknowledgedRequests = try values.decodeIfPresent([String].self, forKey: .acknowledgedRequests) ?? []
         acknowledge(requestId)
+        undatedLegacySeconds = try values.decodeIfPresent(Double.self, forKey: .undatedLegacySeconds)
+        if version < 3, let session = session {
+            let dated = tracking.periods.filter { $0.sessionID == session.id }.reduce(0) { $0 + $1.activeDuration }
+            let undated = max(0, session.elapsed - dated)
+            if undated > 0 { undatedLegacySeconds = max(undatedLegacySeconds ?? 0, undated) }
+        }
         // v1 elapsed time has no reliable wall-clock history and is never uploaded.
-        self.version = 2
+        self.version = 3
     }
 }

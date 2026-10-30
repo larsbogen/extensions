@@ -58,6 +58,23 @@ struct SessionTests {
         let retryJSON = retry.queryItems!.first(where: { $0.name == "context" })!.value!
         let retryContext = try JSONDecoder().decode([String: String].self, from: Data(retryJSON.utf8))
         assert(retryContext == context, "Retries reuse the same idempotent session ID")
+        session.task.queue = FocusQueueContext(accountId: "owner", day: "2026-10-30", entryId: "entry-a", revision: 2)
+        session.task.nextURL = "raycast://extensions/doist/todoist/next-focus-task?context=old"
+        session.pendingNextRequestId = "next-id"
+        let next = URLComponents(url: session.nextDeeplink(requestId: "next-id")!, resolvingAgainstBaseURL: false)!
+        let nextContext = try JSONDecoder().decode([String: String].self, from: Data(next.queryItems!.first { $0.name == "context" }!.value!.utf8))
+        assert(nextContext == ["sessionId": session.id, "requestId": "next-id"])
+        let transition = FocusRequest(id: "new-start", action: "start-queue", sessionId: session.id, transitionRequestId: "next-id")
+        assert(session.acceptsTransition(transition))
+        session.pendingNextRequestId = "newer-next"
+        assert(!session.acceptsTransition(transition), "An older next result must not advance the queue twice")
+        session.queueCompleted = true
+        let completedPresentation = FocusPresentation(session: session, completing: false)
+        assert(!completedPresentation.canPause && !completedPresentation.canComplete && !completedPresentation.canExtend)
+        session.pendingNextRequestId = nil
+        assert(FocusPresentation(session: session, completing: false).canNext)
+        session.queueFinished = true
+        assert(!FocusPresentation(session: session, completing: false).canNext)
         try PresentationTests.run()
         try RequestTests.run()
         try TrackingTests.run()

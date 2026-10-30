@@ -290,7 +290,7 @@ enum TrackingTests {
         do {
             let legacy = Data("{\"version\":1,\"session\":{\"id\":\"old\",\"task\":{\"id\":\"a\",\"title\":\"Old\",\"url\":\"https://todoist.com\"},\"duration\":1500,\"elapsed\":123,\"phase\":\"running\"},\"requestId\":\"old-request\",\"updatedAt\":1}".utf8)
             let snapshot = try JSONDecoder().decode(FocusSnapshot.self, from: legacy)
-            assert(snapshot.version == 2 && snapshot.tracking.periods.isEmpty && snapshot.session?.elapsed == 123)
+            assert(snapshot.version == 3 && snapshot.tracking.periods.isEmpty && snapshot.session?.elapsed == 123 && snapshot.undatedLegacySeconds == 123)
             let h = TrackingHarness(); h.makeEngine(snapshot); h.engine.restore()
             assert(h.engine.snapshot.session?.phase == .paused && h.server.requests.isEmpty)
         }
@@ -393,11 +393,40 @@ enum TrackingTests {
             let store = FocusStore(directory: directory)
             try store.save(FocusSnapshot())
             let loaded = try store.load()
-            assert(loaded?.version == 2)
+            assert(loaded?.version == 3)
+            let legacy = Data("{\"version\":2,\"requestId\":\"keep-receipt\",\"updatedAt\":123,\"tracking\":{\"settings\":{\"enabled\":false,\"includeTaskLink\":false,\"projectChoices\":{},\"workspaces\":[],\"projects\":[],\"cachedAt\":0},\"periods\":[],\"budgets\":{}}}".utf8)
+            try legacy.write(to: store.file)
+            let migrated = try store.load()!
+            assert(migrated.version == 3 && migrated.acknowledgedRequests.contains("keep-receipt"))
+            try store.save(migrated)
+            let backup = try Data(contentsOf: directory.appendingPathComponent("state-v2-before-workday.json"))
+            assert(backup == legacy, "Migration preserves the original bytes before writing new state")
             let permissions = try FileManager.default.attributesOfItem(atPath: store.file.path)[.posixPermissions] as! NSNumber
             assert(permissions.intValue == 0o600)
             try Data("invalid".utf8).write(to: store.file)
             do { _ = try store.load(); assertionFailure("Corrupt data must not become a fresh session") } catch {}
+        }
+        do {
+            let h = TrackingHarness(enabled: false)
+            var first = h.task
+            first.todoistUserId = "todoist-owner"
+            first.projectName = "Arbeidsprosjekt"
+            first.queue = FocusQueueContext(accountId: "todoist-owner", day: "2026-10-30", entryId: "first", revision: 1)
+            h.engine.start(task: first, duration: 1500)
+            h.work(60)
+            h.engine.pause()
+            let oldID = h.engine.snapshot.session!.id
+            var next = first
+            next.queue?.entryId = "second"
+            h.engine.start(task: next, duration: 1500, originRequestId: "guarded-start")
+            assert(h.engine.snapshot.session!.id != oldID, "Another occurrence of the same task gets a new focus session")
+            assert(h.periods[0].seconds == 60 && h.periods[0].stop != nil)
+            assert(h.periods[0].task.todoistUserId == "todoist-owner" && h.periods[0].task.projectName == "Arbeidsprosjekt")
+            assert(h.engine.snapshot.session?.originRequestId == "guarded-start")
+            h.engine.snapshot.session?.pendingNextRequestId = "interrupted-next"
+            h.engine.persist()
+            h.restart()
+            assert(h.engine.snapshot.session?.phase == .paused && h.engine.snapshot.session?.pendingNextRequestId == nil)
         }
         print("Toggl checks passed: exact periods, offline/restart, recovery, durable intent, ambiguity, quotas, external edits, takeover, late responses, storage failure, migration and credentials.")
     }
@@ -632,7 +661,7 @@ enum TrackingTests {
             var snapshot = FocusSnapshot()
             snapshot.tracking.budgets["user:1"] = budget
             let restored = try JSONDecoder().decode(FocusSnapshot.self, from: JSONEncoder().encode(snapshot))
-            assert(restored.version == 2 && restored.tracking.budgets["user:1"]?.blockedUntil == 200)
+            assert(restored.version == 3 && restored.tracking.budgets["user:1"]?.blockedUntil == 200)
         }
         print("Quota checks passed: 10 user + 10 organization calls for five periods, idle, sync modes, reserves, headers, retries, restart and compatibility.")
     }

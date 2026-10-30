@@ -57,7 +57,79 @@ Tests use simulated API responses and do not access a Todoist account.
 To load the fork locally in Raycast, run `npm run dev`. Authenticate in Raycast when prompted.
 The distribution build is written to `dist/`; building and testing do not install the fork or change the Store version.
 
-### Flytende fokuskort (macOS)
+## Min arbeidsdag
+
+**Min arbeidsdag** finnes som egen kommando og som visning i **My Tasks**.
+Eksisterende standardvisning beholdes. Velg **Legg til oppgaver** for å finne
+forslag fra dagens og forfalte oppgaver, eller søk blant alle aktive oppgaver som
+er dine eller uten tildeling. Oppgaver uten dato eller med en fremtidig dato kan
+også tas med. **Legg til i arbeidsdagen** finnes dessuten i de vanlige oppgavelistene.
+
+- **Flytt opp/ned** bestemmer arbeidsrekkefølgen. **Marker som topp tre** fremhever
+  inntil tre oppgaver uavhengig av rekkefølgen; markeringen endrer ikke Todoist-prioritet.
+- Oppdatering fra Todoist beholder utvalget og rekkefølgen. Fullførte og utilgjengelige
+  oppføringer vises separat. **Fjern fra dagen** fjerner bare den lokale oppføringen.
+- **Start dagens fokus** begynner ved første aktive oppføring. **Start fokus herfra**
+  begynner ved den valgte oppføringen. Dagsplanen til reMarkable bruker samme aktive
+  utvalg og rekkefølge.
+- Planen lagres separat for hver Todoist-konto og kalenderdato i Europe/Oslo.
+  På en ny dag tilbyr **Velg hva som videreføres** de uferdige oppgavene fra siste
+  tidligere plan. Bare oppgavene du velger legges til; topp tre velges på nytt.
+
+Arbeidsdagene ligger i `workdays/` i utvidelsens støtteområde. De beholdes uavhengig
+av PDF-eksportenes sju dagers levetid. Atomisk lagring og låsing beskytter mot
+samtidige kommandoer. Oppgavedato, prosjekt, prioritet og selve Todoist-oppgaven
+endres ikke når du planlegger, flytter eller fjerner en lokal oppføring.
+
+### Fokuskøen
+
+Fokus startet fra arbeidsdagen følger den samme rekkefølgen, uten en egen kø å
+redigere. Etter utløpt økt kan du velge **Fortsett**, **Ta pause** eller **Neste
+oppgave**. Etter bekreftet fullføring blir kortet stående med **Start neste** og
+muligheten til å avslutte. Neste oppgave starter først når du velger det, og
+ventetiden teller ikke som arbeid.
+
+**Neste oppgave** lagrer stoppet på gjeldende arbeidsperiode uten å fullføre
+Todoist-oppgaven. Den hoppede oppgaven blir i planen, men køen går bare fremover;
+den begynner ikke automatisk fra toppen. Før overgang kontrolleres fersk
+Todoist-status, og fullførte eller utilgjengelige oppføringer hoppes over. Ved feil
+forblir økten pauset. Endret rekkefølge gjelder ved neste overgang og avbryter ikke
+pågående arbeid. En økt som går over midnatt beholder den opprinnelige plandatoen.
+
+Gjentakende oppgaver knyttes til den valgte forekomsten. Fullføring skal ikke ta
+neste forekomst inn i køen automatisk. Økt-ID og forespørsels-ID beskytter mot
+forsinkede svar og doble handlinger. **Focus Task** utenfor arbeidsdagen fortsetter
+å fungere som en enkeltstående økt.
+
+## Arbeidsoversikt
+
+**Arbeidsoversikt** viser dag eller uke, med **Forrige periode**, **Neste periode**
+og prosjektfilter. Datoene følger Europe/Oslo, og ukene går fra mandag til søndag.
+Visningen oppdateres ved åpning og med **Oppdater** (`⌘R`); den gjør ingen periodiske
+bakgrunnskall.
+
+- Fokustiden bygger på lagrede aktive arbeidsperioder, også når Toggl er slått av.
+  Tid fordeles over dato- og ukegrenser, uten å legge økttotalen til en gang til.
+  En åpen periode telles bare frem til siste lagrede kontrollpunkt; pause, dvale og
+  tid etter krasj telles ikke.
+- Fullføringer hentes fra Todoists aktivitetslogg, på tvers av klienter og prosjekter,
+  filtrert på den innloggede brukeren. Alle sider leses og hendelser dedupliseres.
+  Tallet er antall **fullføringer utført i perioden**, ikke antall unike oppgaver:
+  hver gjentakende forekomst og hver ny fullføring etter gjenåpning teller.
+- Toggl-status skiller mellom bekreftet synkronisering, ventende arbeid, bare lokal
+  tid og avvik. At du har valgt å beholde en ekstern Toggl-versjon betyr ikke at
+  den samsvarer med den lokale tiden. Rapporten kontakter ikke Toggl på nytt.
+- **Datadekning** og oppdateringstid viser om resultatet er komplett, begrenset av
+  kontoens aktivitetshistorikk, delvis hentet eller basert på tidligere lagrede
+  opplysninger. Manglende data vises som ukjent eller et minimum, ikke som null.
+
+Nye arbeidsperioder beholder Todoist-konto og prosjektnavn. Eldre perioder uten
+sikker kontotilknytning vises separat fra hovedtallene. Eldre økttid uten pålitelige
+starttidspunkter beholdes, men fordeles ikke på dager. Rapportcache ligger i
+`work-reports/` i støtteområdet og er skilt per konto og periode.
+
+## Flytende fokuskort (macOS)
+
 
 **Focus Task** (`⌘F` på en Todoist-oppgave) åpner nå et eget, flyttbart macOS-kort.
 Kortet viser oppgavetittelen med tekstbryting og en timer. Det har sin egen størrelse;
@@ -87,7 +159,8 @@ uten å endre lagret størrelse. ⌘P, ⌘+ og ⌘↵ virker i begge visninger.
   Når tiden er ute, blir kortet stående med valget om ny økt eller forlengelse.
 - **Åpne oppgave** åpner oppgaven i Todoist. **Avslutt økt** lukker kortet og stopper timeren.
   Ingen av delene fullfører oppgaven i Todoist.
-- **Fullfør oppgave** fullfører oppgaven i Todoist, fjerner fokuset og lukker kortet.
+- **Fullfør oppgave** fullfører oppgaven i Todoist og fjerner fokuset. En enkeltstående
+  økt lukker kortet; i fokuskøen blir det stående klart for **Start neste**.
   Timeren står på pause mens fullføringen pågår. Ved feil kan du prøve igjen eller fortsette økten.
   For gjentakende oppgaver fullføres den aktuelle forekomsten, og fokusetiketten fjernes fra den neste.
   Hvis kommandoen ble deaktivert av en tidligere versjon, aktiver **Complete Focused Task**
@@ -152,9 +225,17 @@ installerer ingen innloggingstjeneste. Gamle perioder beholder sin opprinnelige
 konto og sitt arbeidsområde ved kontobytte. Allerede lagrede kontotoken kan brukes
 for å avslutte disse periodene; ingen perioder flyttes til den nye kontoen.
 
-Lokal tilstand migreres fra versjon 1 til 2. Tid fra eldre økter beholdes lokalt,
-uten å finne på historiske starttidspunkter eller sende den til Toggl. Ikke bruk en
-eldre hjelpeapp mot migrerte fokusdata.
+Lokal fokusstatus migreres fra versjon 1 eller 2 til versjon 3. Før migrering
+lagres en byteidentisk kopi som `state-v1-before-workday.json` eller
+`state-v2-before-workday.json` ved siden av `state.json`, med tilgang bare for
+brukeren. Eksisterende sikkerhetskopi overskrives ikke. Arbeidsperioder, historikk,
+ventende Toggl-arbeid og vindusinnstillinger beholdes. Eldre tid uten pålitelige
+starttidspunkter blir ikke gjort om til daterte arbeidsperioder eller sendt til Toggl.
+
+En eldre hjelpeapp som bare støtter versjon 1 eller 2 må ikke brukes mot migrerte
+data. Tilbakeføring må bruke en versjon som støtter versjon 3; ikke erstatt gjeldende
+status med sikkerhetskopien for å omgå dette, siden nyere arbeid og ventende
+synkronisering da kan gå tapt.
 
 Synkroniseringen bruker separate, vedvarende budsjetter for bruker- og
 organisasjonskall, tilpasset gratiskvoten på 30 kall per time. Vanlige kall får bruke
@@ -173,7 +254,8 @@ Budsjetter og ventetider overlever omstart. Andre integrasjoner kan bruke den
 samme kvoten etter siste svar fra Toggl; verken serveropplysninger eller lokale
 budsjetter garanterer derfor at et stopp kan sendes straks. Stoppetiden beholdes
 lokalt slik at senere synkronisering ikke forlenger registrert arbeidstid.
-Rapporter, ukeoversikt, etikettkoblinger og fakturerbar tid inngår ikke.
+Arbeidsoversikten viser lokal tid og sist kjente Toggl-status. Import av annen
+Toggl-historikk, etikettkoblinger og fakturerbar tid inngår ikke.
 
 `npm run test:focus` bruker falsk klokke og simulerte Toggl-svar. Testene dekker
 blant annet nøyaktig aktiv tid, frakoblet arbeid, omstart, uklare svar, kallforbruk,
@@ -188,8 +270,9 @@ etter at en ny er valgt. Nye kømeldinger går foran gamle meldinger, og en misl
 lagring stanser behandlingen til meldingen kan lagres.
 
 Bygging krever eksisterende Xcode Command Line Tools på macOS. `npm run build` og
-`npm run dev` bygger hjelpeappen først. Ved endring i Swift-koden mens den lokale
-utviklingstjenesten kjører, bruk `npm run build:focus`, lukk fokuskortet og åpne det igjen.
+`npm run dev` bygger hjelpeappen først. **Bygging og testing skal ikke avbryte en
+pågående fokusøkt.** Den nye hjelpeappen tas i bruk ved neste naturlige oppstart;
+verifikasjonen skal ikke lukke eller starte brukerens aktive kort på nytt.
 Bygge- og testmappen kan overstyres med `FOCUS_PANEL_BUILD_DIR` (relativt til
 utvidelsen eller som absolutt sti); standarden er `work/focus-panel-build`.
 Hjelpeappen bygges for arkitekturen til maskinen du bruker; et distribuert bygg for
@@ -262,38 +345,40 @@ struktur gir en feil fremfor å gjette emne eller avsender.
 
 ## Dagsplan til reMarkable (macOS)
 
-Kommandoen **Send dagsplan til reMarkable** lager en norsk dagsplan med dagens og
-forfalte oppgaver, beregnet i Europe/Oslo. Den inkluderer aktive oppgaver med dato
-eller deadline i dag eller tidligere, som er ufordelte eller tildelt deg.
-Todoist-data leses på nytt både når kommandoen åpnes og når forhåndsvisningen lages.
+Kommandoen **Send dagsplan til reMarkable** lager en norsk dagsplan fra det aktive
+utvalget i **Min arbeidsdag**, i samme rekkefølge og med de samme topp tre-markeringene.
+Todoist-data og arbeidsdagen leses på nytt ved åpning og før eksport. Oppgaver som
+ikke lenger er tilgjengelige tas ikke med i en ny PDF.
 
-1. Åpne **Velg målmappe**, og velg en eksisterende mappe eller **Opprett ny mappe**.
+1. Velg oppgaver i **Min arbeidsdag**. Hvis dagens plan mangler eller er tom, gir
+   eksportkommandoen handlingen **Velg oppgaver til arbeidsdagen**. Etter redigering
+   kan du åpne eksportkommandoen igjen eller bruke **Hent arbeidsdagen på nytt**.
+2. Åpne **Velg målmappe**, og velg en eksisterende mappe eller **Opprett ny mappe**.
    Navnefeltet foreslår `Dagsplaner`. Den nye mappen opprettes i **Mine filer** og
-   velges automatisk som målmappe. En eksisterende mappe med samme navn der
-   gjenbrukes; mapper andre steder påvirkes ikke.
-2. Alle oppgaver er valgt fra start. Enter velger bort/til én oppgave. Søk endrer
-   ikke utvalget. Handlingsmenyen har også **Velg alle** og **Fjern alle valg**.
-3. **Lag forhåndsvisning** (`⌘↵`) fryser utvalget, lager PDF og kontrollerer hver
-   side. PDF-en åpnes i standard PDF-leser.
-4. Gå tilbake til Raycast etter PDF-forhåndsvisningen. Kontroller oppgaver,
-   sideantall og målmappe, og trykk **Enter** for **Send til reMarkable**.
-   Forhåndsvisning alene laster ikke opp filen. Bekreftet sending viser
-   dokumentnavn og dokument-ID. Åpner du kommandoen på nytt, vises dagens siste
-   usendte forhåndsvisning automatisk, klar for eksplisitt sending.
+   velges automatisk. En eksisterende mappe med samme navn der gjenbrukes.
+3. **Lag forhåndsvisning** (`⌘↵`) fryser planen, lager PDF og kontrollerer hver side.
+   Raycast viser ett sidebilde om gangen med **Side X av Y**. Bla med **Neste side**
+   og **Forrige side** (`⌘→` / `⌘←`). Sidenavigasjon sender aldri dokumentet.
+4. Velg **Send til reMarkable** (`⌘⇧↵`) for eksplisitt sending til den viste mappen.
+   Forhåndsvisning alene laster ikke opp filen. Bekreftet sending lagrer dokument-ID.
+   **Åpne PDF eksternt** er et eget valg; andre apper åpnes ikke automatisk.
 
-PDFKit genererer dokumentet direkte i utvidelsen, uten Marked, AppleScript eller
-Python som PDF-motor. Sidene har reMarkable-skjermens 3:4-format (447 × 596 pt), så
-de fyller skjermen uten skalering, og venstremargen gir plass til verktøylinjen.
-Første side har ukedag og dato, antall oppgaver, antall forfalte og samlet
-estimert tid, tre linjer for **Dagens fokus** og en **tidslinje** med dagens
-oppgaver som har klokkeslett. Oppgavelisten er gruppert per prosjekt, med store
-avkrysningsbokser, prioritet som fylte/halvfylte/tomme sirkler (P4 vises ikke),
-svart **FORFALT**-merke og underoppgaver innrykket under forelderen. En
-prikkekolonne til høyre gir plass til notater ved hver oppgave, og dokumentet
-avsluttes med en notatflate i prikkenett. Lange titler brytes; bare tidslinjen
-forkorter tekst. Oppgavetekst behandles bokstavelig; HTML og Markdown kan ikke
-endre dokumentets mal. Inter brukes til tekst og Noto Emoji til svarte/hvite
-emojis. Skriftene følger med utvidelsen og bygges inn i PDF-en.
+Dagens siste usendte arbeidsdagseksport kan gjenopptas ved neste åpning. Endringer
+markeres når arbeidsdagen leses på nytt. Velg **Kontroller arbeidsdagen** (`⌘R`) i
+forhåndsvisningen for å oppdatere denne kontrollen. Den gamle PDF-en endres ikke;
+lag en ny forhåndsvisning for å få med endringene.
+
+PDFKit genererer dokumentet direkte. Sidene har reMarkable-skjermens 3:4-format
+(447 × 596 pt), og venstremargen gir plass til verktøylinjen. Første side har dato,
+oppgaveantall, forfalte oppgaver, samlet estimat, valgt **Dagens fokus** og en
+kronologisk tidslinje over dagens oppgaver med klokkeslett.
+
+**Arbeidsrekkefølge** følger den lokale planen, også når prosjekter er blandet
+eller en underoppgave står før forelderen. Prosjekt og eventuell forelder vises
+som tilleggsinformasjon. Store avkrysningsbokser, prioritetssirkler, **FORFALT**-merke,
+prikkekolonne og en avsluttende notatflate beholdes. Lange titler brytes og finnes
+i sin helhet i oppgavelisten; fokusfeltet og tidslinjen kan forkorte oppsummeringen.
+Oppgavetekst behandles bokstavelig. Inter og Noto Emoji følger med og bygges inn i PDF-en.
 
 ### Lokalt oppsett
 
@@ -318,13 +403,21 @@ Ingen innloggingshemmeligheter lagres eller logges av denne kommandoen.
 ### Forhåndsvisning, nytt forsøk og lokale filer
 
 Hver eksport får eget dokumentnavn `Dagsplan – ÅÅÅÅ-MM-DD – TT.MM.SS` og en unik
-jobbmappe i Raycasts støtteområde (`daily-plans/<UUID>`). PDF, Markdown-kopi og
-jobbstatus beholdes i sju dager; utløpte jobber ryddes ved neste bruk. PNG-bildene
-som brukes til validering slettes straks. **Vis eksportfiler** åpner jobbmappen.
+jobbmappe i Raycasts støtteområde (`daily-plans/<UUID>`). PDF, Markdown-kopi,
+jobbstatus og validerte PNG-sidebilder beholdes i sju dager; utløpte jobber ryddes
+ved neste bruk. Midlertidige og mislykkede renderinger fjernes. **Vis eksportfiler**
+viser den lagrede PDF-en i Finder.
+
+Sidebildenes kontrollsummer knyttes til PDF-ens kontrollsum. Manglende eller
+ødelagte sidebilder regenereres fra den samme verifiserte PDF-en, uten å endre
+planen eller sendestatus. Dette gjelder også eldre eksportjobber. Nye øyeblikksbilder
+bruker versjon 2 med manuell rekkefølge og topp tre; eksisterende versjon 1-jobber
+og deres PDF-er beholdes uendret og kan fortsatt åpnes og sendes når statusen tillater det.
 
 Endret utvalg eller målmappe krever ny forhåndsvisning. **Åpne siste eksport**
 gjenåpner det tidligere, frosne dokumentet. PDF-ens kontrollsum verifiseres før
-sending. Bare én eksport, sending eller mappeopprettelse kan kjøre om gangen, også på tvers av
+sending og gjenoppretting av sidebilder. Eksport, sending, mappeopprettelse og
+gjenoppretting av sidebilder bruker samme låsing, også på tvers av
 kommandoinstanser. Bekreftet sending sperrer ny sending av samme jobb. Ved et
 uklart nettverksutfall eller avbrudd under opplasting må du kontrollere reMarkable;
 kommandoen prøver aldri å laste opp samme jobb automatisk igjen.
@@ -341,10 +434,10 @@ Todoist-oppgaver opprettes eller endres. Automatisk sending og USB/SSH inngår i
 
 ### Utvikling og kontroll
 
-`npm test` inkluderer simulerte prosessvar for Cloud og Poppler, dato-/utvalgstester
-og tester som leser faktiske genererte PDF-er med PDF.js. Ingen automatiserte tester sender
-noe til reMarkable. Kontroller lokalt med `npm run dev`: utvalg → mappe → PDF →
-forhåndsvisning. En faktisk sending utføres først når brukeren velger sendehandlingen.
+`npm test` inkluderer simulerte Cloud- og Poppler-svar, tester av rekkefølge og utvalg,
+kontroll av bildecache og tester som leser faktiske genererte PDF-er med PDF.js.
+Ingen automatiserte tester sender noe til reMarkable eller åpner en ekstern PDF-leser.
+En faktisk sending skjer bare gjennom den eksplisitte sendehandlingen.
 
 Den inkluderte [Noto Emoji-fonten](https://github.com/google/fonts/tree/main/ofl/notoemoji)
 og [Inter](https://github.com/rsms/inter) er distribuert under SIL Open Font License;
@@ -358,3 +451,39 @@ løsrevne AppKit-visninger med lange titler, alle fire tekststørrelser og minst
 bredde. Testene åpner ingen vinduer og bruker ingen ekte kontoer. TypeScript-testene,
 lint og produksjonsbygg kontrolleres separat. Faktisk samspill med skrivebord,
 fysiske skjermer og VoiceOver er ikke verifisert av disse testene.
+
+## Verifikasjon av arbeidsdag, kø, rapporter og forhåndsvisning
+
+Den normale testpakken dekker planlagring, samtidige oppdateringer, kontoskille,
+valgt videreføring, gjentakende oppgaver og samme rekkefølge gjennom arbeidsdag,
+fokuskø og eksport. Rapporttester bruker faste klokker og simulerte API-sider,
+inkludert sommertid, midnatt, gjentatte fullføringer, nettfeil og begrenset historikk.
+Fokustestene bruker falsk klokke og løsrevne AppKit-visninger, og dekker køoverganger,
+gamle/doble svar, migrering, sikkerhetskopi og bevart Toggl-arbeid.
+
+```sh
+npm test -- --maxWorkers=1
+npm run test:focus
+npm run lint
+npm run typecheck
+npm run build
+```
+
+Kjør kontrollene sekvensielt lokalt. Native byggeprodukter og testprogrammer ligger
+i `work/focus-panel-build/` eller en eksplisitt `FOCUS_PANEL_BUILD_DIR`. Kontroller
+ledig diskplass før native bygg. Den eksisterende macOS-CI-flyten bruker samme
+kommandolinjekontroller uten skrivebordsautomatisering.
+
+PDF-testene kontrollerer faktisk tekst, sidestørrelser og koordinater. En syntetisk
+PDF med norske bokstaver, emoji, lange titler, topp tre og blandet prosjektrekkefølge
+er også rendret med Poppler og kontrollert side for side som lokale bilder.
+
+Lokalt 30. oktober 2026 bestod 242 TypeScript-tester med én arbeider, alle fem
+Swift-testprogrammene med falsk klokke og 22 tester av installasjon/oppdatering.
+Lint, typesjekk og produksjonsbygg inngår i den samme kontrollen.
+
+Faktisk bildevisning og navigasjon i Raycast, samspill mellom det aktive fokusvinduet
+og skrivebordet, samt ekte Todoist-/Toggl-kall og reMarkable Cloud-sending er ikke
+verifisert gjennom disse testene. Kontrollene bruker ingen åpne brukerprogrammer, fysiske enheter eller innloggede
+nettlesere. De dokumenterte begrensningene krever ingen manuelle handlinger for å
+fullføre automatisert verifikasjon.
