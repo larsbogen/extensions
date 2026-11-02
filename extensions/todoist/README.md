@@ -132,13 +132,23 @@ starttidspunkter beholdes, men fordeles ikke på dager. Rapportcache ligger i
 
 
 **Focus Task** (`⌘F` på en Todoist-oppgave) åpner nå et eget, flyttbart macOS-kort.
-Kortet viser oppgavetittelen med tekstbryting og en timer. Det har sin egen størrelse;
+Kortet viser oppgavetittelen med tekstbryting og en tidsring. Det har sin egen størrelse;
 Raycasts generelle utseende blir ikke endret.
 
-Kompaktmodus er standard, også ved oppgradering. Kortet starter på 360 × 240 punkter
-(minst 320 punkter bredt), med automatisk minimumshøyde for valgt tekststørrelse.
-Det viser tittel, timer/status, **Pause/Fortsett** og menyen **•••**. Lange titler kan
-rulles uten å forkortes. Menyen gir **Vis detaljer**, **Fullfør oppgave**, **+5 min**,
+Kortet følger automatisk macOS-innstillingen for lyst eller mørkt utseende, også
+mens det er åpent. Lyst tema har hvit bakgrunn, mørk tekst og dempede grønne detaljer.
+Mørkt tema beholder den tidligere mørke bakgrunnen og systemets grønne/oransje farger.
+Temabytte endrer bare presentasjonen, ikke timeren, oppgaven eller Toggl-registreringen.
+
+Kompaktmodus er standard, også ved oppgradering. Standardbredden er 360 punkter
+(minst 320); minimumshøyden tilpasses tidsringen, knappene og valgt tekststørrelse.
+Tidligere lagrede størrelser beholdes som preferanse, og kortet vokser ved behov.
+Prosjektnavnet vises over tittelen når det finnes. Tiden står midt i ringen, som
+fylles med klokken etter hvert som økten går. Ved pause blir ringen oransje. Økter
+uten tidsgrense viser aktiv tid og en nøytral ring uten prosentvis fremdrift.
+
+**Pause/Fortsett**, **+5 min** og **Fullfør** er synlige i både kompakt- og detaljvisning.
+Lange titler kan rulles uten å forkortes. Menyen **•••** gir **Vis detaljer**, **Fullfør oppgave**, **+5 min**,
 **Åpne oppgave**, **Flytt** og **Avslutt økt**. Ubegrensede økter skjuler **+5 min**.
 **Vis detaljer** åpner alle kontrollene nedenfor; velg **Vis kompakt** for å gå tilbake.
 Visningsvalg og størrelse for hver visning huskes separat, sammen med tekststørrelse
@@ -159,7 +169,7 @@ uten å endre lagret størrelse. ⌘P, ⌘+ og ⌘↵ virker i begge visninger.
   Når tiden er ute, blir kortet stående med valget om ny økt eller forlengelse.
 - **Åpne oppgave** åpner oppgaven i Todoist. **Avslutt økt** lukker kortet og stopper timeren.
   Ingen av delene fullfører oppgaven i Todoist.
-- **Fullfør oppgave** fullfører oppgaven i Todoist og fjerner fokuset. En enkeltstående
+- **Fullfør** (eller **Fullfør oppgave** i menyen) fullfører oppgaven i Todoist og fjerner fokuset. En enkeltstående
   økt lukker kortet; i fokuskøen blir det stående klart for **Start neste**.
   Timeren står på pause mens fullføringen pågår. Ved feil kan du prøve igjen eller fortsette økten.
   For gjentakende oppgaver fullføres den aktuelle forekomsten, og fokusetiketten fjernes fra den neste.
@@ -443,7 +453,7 @@ Den inkluderte [Noto Emoji-fonten](https://github.com/google/fonts/tree/main/ofl
 og [Inter](https://github.com/rsms/inter) er distribuert under SIL Open Font License;
 se `assets/daily-plan/OFL.txt` og `assets/daily-plan/Inter-OFL.txt`.
 
-### Verifikasjon av kompaktmodus
+### Verifikasjon av tidsring og kompaktmodus
 
 Automatiserte Swift-tester dekker migrering av tidligere fokusdata, separate
 størrelser, visningsbytte, timerfaser, handlingsmeny/hurtigtaster, varsler og
@@ -451,6 +461,20 @@ løsrevne AppKit-visninger med lange titler, alle fire tekststørrelser og minst
 bredde. Testene åpner ingen vinduer og bruker ingen ekte kontoer. TypeScript-testene,
 lint og produksjonsbygg kontrolleres separat. Faktisk samspill med skrivebord,
 fysiske skjermer og VoiceOver er ikke verifisert av disse testene.
+
+Tidsringtestene kontrollerer retning og fremdrift, ubegrensede økter, lange klokketider,
+synlig **Fullfør**-knapp og sperrede handlinger mens fullføring pågår. Løsrevne
+AppKit-visninger bytter mellom lyst og mørkt utseende; testene kontrollerer at
+fargene oppdateres og at økt, kø og Toggl-data bevares uten lagring eller nettverkskall.
+Dette tester AppKits utseendearv uten å endre brukerens systeminnstilling. Et faktisk
+temabytte i et åpent fokusvindu er ikke testet gjennom skrivebordsautomatisering.
+`FOCUS_PANEL_PREVIEW_DIR` kan settes ved `npm run test:focus` for å lagre PNG-er av
+de løsrevne native visningene i begge temaer, med syntetiske eksempeldata.
+
+Lokalt 2. november 2026 bestod 242 TypeScript-tester, native fokus-/Toggl-/køtester,
+lint, typesjekk og produksjonsbygg. Native PNG-er ble kontrollert i lyst og mørkt
+tema, både kompakt (360 punkter) og detaljvisning (420 punkter). Layouttestene
+dekker også kompaktbredden 320, tilkoblet Toggl, fullføring, feil og fullført køoppgave.
 
 ## Verifikasjon av arbeidsdag, kø, rapporter og forhåndsvisning
 

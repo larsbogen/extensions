@@ -30,6 +30,7 @@ if (process.argv.includes("--test")) {
   run([
     ...modelSources,
     "-D", "FOCUS_TEST",
+    join(source, "FocusVisuals.swift"),
     join(source, "FocusPanel.swift"),
     join(source, "TogglUI.swift"),
     join(source, "PresentationTests.swift"),
@@ -42,7 +43,7 @@ if (process.argv.includes("--test")) {
   execFileSync(test, [], { stdio: "inherit" });
 } else {
   const binary = join(work, "FocusPanel");
-  run([...modelSources, join(source, "FocusPanel.swift"), join(source, "TogglUI.swift"), "-O", "-o", binary]);
+  run([...modelSources, join(source, "FocusVisuals.swift"), join(source, "FocusPanel.swift"), join(source, "TogglUI.swift"), "-O", "-o", binary]);
   execFileSync("/usr/bin/codesign", ["--force", "--sign", "-", binary], { stdio: "inherit" });
   // Replace only after compilation succeeds, so the local watcher never sees a partial binary.
   renameSync(binary, join(assets, "MacOS", "FocusPanel"));

@@ -44,18 +44,6 @@ final class ResizeGrip: NSView {
     }
 }
 
-final class ProgressTrack: NSView {
-    var progress: Double = 0 { didSet { needsDisplay = true } }
-    var tint = NSColor.systemGreen { didSet { needsDisplay = true } }
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.labelColor.withAlphaComponent(0.10).setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: 3, yRadius: 3).fill()
-        tint.setFill()
-        let fill = NSRect(x: 0, y: 0, width: bounds.width * progress, height: bounds.height)
-        NSBezierPath(roundedRect: fill, xRadius: 3, yRadius: 3).fill()
-    }
-}
-
 final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let directory: URL
     let lockDescriptor: Int32
@@ -77,6 +65,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var togglControls: NSStackView!
     var fixedContentHeight: CGFloat { contentStack.fittingSize.height - titleAreaHeight.constant + 54 }
     var expandedRows: [NSView] = []
+    var rowWidths: [(NSView, NSLayoutConstraint)] = []
     let actionMenu = NSButton(title: "•••", target: nil, action: nil)
     let noticeLabel = NSTextField(wrappingLabelWithString: "")
     let retryButton = NSButton(title: "Prøv igjen", target: nil, action: nil)
@@ -89,7 +78,9 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var viewWidth: CGFloat { panel?.frame.width ?? contentStack?.superview?.bounds.width ?? CGFloat(snapshot.appearance.size.width) }
     var viewHeight: CGFloat { panel?.frame.height ?? contentStack?.superview?.bounds.height ?? CGFloat(snapshot.appearance.size.height) }
     var minimumSize: NSSize {
-        NSSize(width: compact ? 320 : 420, height: fixedContentHeight + max(40, snapshot.appearance.fontSize + 8))
+        // Show ordinary titles in full while keeping very long ones scrollable.
+        let titleSpace = min(measuredTitleHeight, max(40, snapshot.appearance.fontSize * 3.6 + 8))
+        return NSSize(width: compact ? 320 : 420, height: fixedContentHeight + max(40, titleSpace))
     }
     var compact: Bool { snapshot.appearance.mode == .compact }
     var presentation: FocusPresentation? {
@@ -111,16 +102,18 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let breakButton = NSButton(title: "Ta pause", target: nil, action: nil)
     var queueRow: NSStackView!
     let titleLabel = DragLabel(wrappingLabelWithString: "")
+    let projectLabel = NSTextField(labelWithString: "")
+    let trackingSummary = NSTextField(wrappingLabelWithString: "")
     let statusLabel = DragLabel(labelWithString: "FOKUS · TODOIST")
     let clockLabel = NSTextField(labelWithString: "25:00")
     let captionLabel = NSTextField(labelWithString: "igjen")
     let hintLabel = NSTextField(wrappingLabelWithString: "")
-    let progress = ProgressTrack()
-    let pauseButton = NSButton(title: "Pause", target: nil, action: nil)
+    let progress = FocusRingView()
+    let pauseButton = FocusActionButton(title: "Pause", target: nil, action: nil)
     let openButton = NSButton(title: "Åpne oppgave", target: nil, action: nil)
     let endButton = NSButton(title: "Avslutt økt", target: nil, action: nil)
-    let completeButton = NSButton(title: "Fullfør oppgave", target: nil, action: nil)
-    let extendButton = NSButton(title: "+5 min", target: nil, action: nil)
+    let completeButton = FocusActionButton(title: "Fullfør", target: nil, action: nil)
+    let extendButton = FocusActionButton(title: "+5 min", target: nil, action: nil)
     let fontPicker = NSPopUpButton()
     let durationPicker = NSPopUpButton()
     let widthPicker = NSPopUpButton()
@@ -199,8 +192,8 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
-        panel.appearance = NSAppearance(named: .darkAqua)
-        panel.backgroundColor = NSColor(calibratedRed: 0.10, green: 0.12, blue: 0.115, alpha: 1)
+        // Inherit the system appearance; the content refreshes dynamic colors live.
+        panel.backgroundColor = FocusTheme.background
         panel.minSize = NSSize(width: compact ? 320 : 420, height: 200)
         panel.maxSize = NSSize(width: 1200, height: 1000)
         previousFrameSize = appearance.size
@@ -226,7 +219,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func buildContent() -> NSView {
         let appearance = snapshot.appearance
         // An opaque surface keeps the small controls readable over bright work apps.
-        let backdrop = NSView()
+        let backdrop = FocusSurfaceView()
         let grip = ResizeGrip()
         grip.translatesAutoresizingMaskIntoConstraints = false
         grip.toolTip = "Dra for å endre størrelsen på fokusvinduet"
@@ -238,8 +231,10 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         ])
 
         statusLabel.font = .systemFont(ofSize: 11, weight: .bold)
-        statusLabel.textColor = .systemGreen
+        statusLabel.textColor = FocusTheme.accent
+        titleLabel.textColor = FocusTheme.foreground
         titleLabel.font = .systemFont(ofSize: appearance.fontSize, weight: .semibold)
+        titleLabel.alignment = .center
         titleLabel.maximumNumberOfLines = 0
         titleLabel.lineBreakMode = .byWordWrapping
         titleLabel.isSelectable = false
@@ -257,21 +252,49 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         titleScroll.drawsBackground = false
         titleScroll.hasVerticalScroller = true
         titleScroll.autohidesScrollers = true
+        titleScroll.scrollerStyle = .overlay
         titleAreaHeight = titleScroll.heightAnchor.constraint(equalToConstant: 80)
         titleAreaHeight.isActive = true
         titleScroll.setAccessibilityLabel("Hele oppgavetittelen")
 
-        clockLabel.font = .monospacedDigitSystemFont(ofSize: 46, weight: .medium)
+        projectLabel.font = .systemFont(ofSize: 12)
+        projectLabel.textColor = FocusTheme.secondary
+        projectLabel.alignment = .center
+        projectLabel.lineBreakMode = .byTruncatingTail
+        let taskLabels = NSStackView(views: [projectLabel, titleScroll])
+        taskLabels.orientation = .vertical
+        taskLabels.alignment = .centerX
+        taskLabels.spacing = 5
+        taskLabels.detachesHiddenViews = true
+        projectLabel.widthAnchor.constraint(equalTo: taskLabels.widthAnchor).isActive = true
+        titleScroll.widthAnchor.constraint(equalTo: taskLabels.widthAnchor).isActive = true
+
+        clockLabel.font = .monospacedDigitSystemFont(ofSize: 40, weight: .medium)
+        clockLabel.textColor = FocusTheme.foreground
+        clockLabel.alignment = .center
         clockLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         captionLabel.font = .systemFont(ofSize: 13)
-        captionLabel.textColor = .secondaryLabelColor
+        captionLabel.textColor = FocusTheme.secondary
+        captionLabel.alignment = .center
         let timeLabels = NSStackView(views: [clockLabel, captionLabel])
-        timeLabels.orientation = .horizontal
-        timeLabels.alignment = .firstBaseline
-        timeLabels.spacing = 8
+        timeLabels.orientation = .vertical
+        timeLabels.alignment = .centerX
+        timeLabels.spacing = 5
+        timeLabels.translatesAutoresizingMaskIntoConstraints = false
+        progress.addSubview(timeLabels)
+        let timeRow = NSView()
+        progress.translatesAutoresizingMaskIntoConstraints = false
+        timeRow.addSubview(progress)
+        NSLayoutConstraint.activate([
+            progress.widthAnchor.constraint(equalToConstant: 178),
+            progress.heightAnchor.constraint(equalToConstant: 178),
+            progress.centerXAnchor.constraint(equalTo: timeRow.centerXAnchor),
+            progress.topAnchor.constraint(equalTo: timeRow.topAnchor),
+            progress.bottomAnchor.constraint(equalTo: timeRow.bottomAnchor),
+            timeLabels.centerXAnchor.constraint(equalTo: progress.centerXAnchor),
+            timeLabels.centerYAnchor.constraint(equalTo: progress.centerYAnchor),
+        ])
         button(extendButton, #selector(extendSession))
-        let timeRow = row([timeLabels, spacer(), extendButton])
-        progress.heightAnchor.constraint(equalToConstant: 6).isActive = true
 
         button(pauseButton, #selector(togglePause))
         button(openButton, #selector(openTask))
@@ -284,18 +307,28 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         extendButton.keyEquivalentModifierMask = [.command]
         completeButton.keyEquivalent = "\r"
         completeButton.keyEquivalentModifierMask = [.command]
-        completeButton.contentTintColor = .systemGreen
+        pauseButton.style = .primary
+        completeButton.style = .secondary
+        extendButton.style = .secondary
+        for control in [pauseButton, extendButton, completeButton] {
+            control.widthAnchor.constraint(greaterThanOrEqualToConstant: 108).isActive = true
+        }
         completeButton.toolTip = "Fullfør oppgaven i Todoist og stopp fokuset"
         button(actionMenu, #selector(showActions))
         actionMenu.setAccessibilityLabel("Handlinger for fokusoppgaven")
         actionMenu.toolTip = "Handlinger og visning"
-        let actions = row([pauseButton, openButton, spacer(), endButton, actionMenu])
-        let completionRow = row([completeButton, spacer()])
+        let primaryActions = row([pauseButton, extendButton])
+        let actionGroup = NSStackView(views: [primaryActions, completeButton])
+        actionGroup.orientation = .vertical
+        actionGroup.alignment = .centerX
+        actionGroup.spacing = 8
+        actionGroup.detachesHiddenViews = true
+        let actions = row([openButton, spacer(), endButton])
         button(nextButton, #selector(nextTask))
         button(breakButton, #selector(takeBreak))
         queueRow = row([nextButton, breakButton, spacer()])
         hintLabel.font = .systemFont(ofSize: 12)
-        hintLabel.textColor = .secondaryLabelColor
+        hintLabel.textColor = FocusTheme.secondary
         hintLabel.maximumNumberOfLines = 2
 
         fontPicker.addItems(withTitles: ["Tekst: 20", "Tekst: 26", "Tekst: 34", "Tekst: 42"])
@@ -317,7 +350,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         positionPicker.target = self
         positionPicker.action = #selector(movePanel)
         positionPicker.setAccessibilityLabel("Flytt fokusvinduet")
-        let header = row([statusLabel, spacer(), positionPicker])
+        let header = row([statusLabel, spacer(), positionPicker, actionMenu])
         button(togglSettings, #selector(openTogglSettings))
         button(togglReview, #selector(reviewToggl))
         button(togglSync, #selector(syncToggl))
@@ -333,13 +366,18 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         togglProject.widthAnchor.constraint(lessThanOrEqualToConstant: 200).isActive = true
         togglControls = row([togglToggle, spacer(), togglProject])
         togglStatus.font = .systemFont(ofSize: 12)
-        togglStatus.textColor = .secondaryLabelColor
+        togglStatus.textColor = FocusTheme.secondary
         togglStatus.setContentCompressionResistancePriority(.required, for: .vertical)
         activeTimeLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        activeTimeLabel.textColor = FocusTheme.secondary
+        trackingSummary.font = .systemFont(ofSize: 11)
+        trackingSummary.textColor = FocusTheme.secondary
+        trackingSummary.alignment = .center
         let togglActions = row([togglSettings, togglReview, spacer(), togglSync])
         button(retryButton, #selector(completeTask))
         button(detailsButton, #selector(showDetails))
         noticeLabel.font = .systemFont(ofSize: 12)
+        noticeLabel.textColor = FocusTheme.foreground
         noticeLabel.maximumNumberOfLines = 0
         noticeLabel.setContentCompressionResistancePriority(.required, for: .vertical)
         noticeHeight = noticeLabel.heightAnchor.constraint(equalToConstant: 0)
@@ -350,12 +388,12 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         noticeStack.spacing = 6
         noticeStack.detachesHiddenViews = true
         noticeLabel.widthAnchor.constraint(equalTo: noticeStack.widthAnchor).isActive = true
-        expandedRows = [activeTimeLabel, progress, completionRow, hintLabel, togglActions, options]
-        contentStack = NSStackView(views: [header, titleScroll, timeRow, activeTimeLabel, progress, completionRow, actions, queueRow!, hintLabel, noticeStack, togglControls, togglStatus, togglActions, options])
+        expandedRows = [activeTimeLabel, hintLabel, togglActions, options]
+        contentStack = NSStackView(views: [header, taskLabels, timeRow, actionGroup, trackingSummary, activeTimeLabel, actions, queueRow!, hintLabel, noticeStack, togglControls, togglStatus, togglActions, options])
         contentStack.detachesHiddenViews = true
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
-        contentStack.spacing = 14
+        contentStack.spacing = 12
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         backdrop.addSubview(contentStack)
         NSLayoutConstraint.activate([
@@ -364,8 +402,10 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             contentStack.trailingAnchor.constraint(equalTo: backdrop.trailingAnchor, constant: -24),
             contentStack.bottomAnchor.constraint(lessThanOrEqualTo: backdrop.bottomAnchor, constant: -20),
         ])
-        for view in [header, titleScroll, timeRow, activeTimeLabel, progress, completionRow, actions, queueRow!, hintLabel, togglControls!, togglStatus, togglActions, options, noticeStack!] {
-            view.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+        for view in [header, taskLabels, timeRow, actionGroup, trackingSummary, activeTimeLabel, actions, queueRow!, hintLabel, togglControls!, togglStatus, togglActions, options, noticeStack!] {
+            let width = view.widthAnchor.constraint(equalTo: contentStack.widthAnchor)
+            rowWidths.append((view, width))
+            width.isActive = true
         }
         return backdrop
     }
@@ -389,13 +429,19 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let session = snapshot.session else { return }
         titleLabel.stringValue = session.task.title
         titleLabel.setAccessibilityLabel(session.task.title)
+        projectLabel.stringValue = session.task.projectName ?? ""
+        projectLabel.isHidden = projectLabel.stringValue.isEmpty
+        projectLabel.toolTip = session.task.projectName
         let total = Int(ceil(session.duration > 0 ? session.remaining : session.elapsed))
         clockLabel.stringValue = total >= 3600
             ? String(format: "%d:%02d:%02d", total / 3600, (total / 60) % 60, total % 60)
             : String(format: "%02d:%02d", total / 60, total % 60)
         clockLabel.setAccessibilityLabel("\(clockLabel.stringValue) \(session.duration > 0 ? "igjen" : "aktiv tid")")
+        let clockWidth = (clockLabel.stringValue as NSString).size(withAttributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 40, weight: .medium)]).width
+        clockLabel.font = .monospacedDigitSystemFont(ofSize: min(40, 40 * 140 / max(1, clockWidth)), weight: .medium)
         progress.progress = session.progress
-        progress.tint = session.phase == .paused ? .systemOrange : .systemGreen
+        progress.hasTimeLimit = session.duration > 0
+        progress.tint = session.phase == .paused ? FocusTheme.pausedAccent : FocusTheme.accent
         statusLabel.textColor = progress.tint
         captionLabel.stringValue = session.duration > 0 ? "igjen" : "aktiv tid"
         switch session.phase {
@@ -417,8 +463,8 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             hintLabel.stringValue = "Start en ny økt når du er klar."
         }
         pauseButton.setAccessibilityLabel(pauseButton.title)
-        completeButton.title = isCompleting ? "Fullfører …" : "Fullfør oppgave"
-        completeButton.setAccessibilityLabel(completeButton.title)
+        completeButton.title = isCompleting ? "Fullfører …" : "Fullfør"
+        completeButton.setAccessibilityLabel(isCompleting ? "Fullfører oppgaven i Todoist" : "Fullfør oppgave i Todoist")
         completeButton.isEnabled = presentation?.canComplete == true
         pauseButton.isEnabled = presentation?.canPause == true
         extendButton.isEnabled = presentation?.canExtend == true
@@ -490,12 +536,17 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let seconds = max(0, Int(session.elapsed))
         activeTimeLabel.stringValue = String(format: "Arbeidstid i økten: %d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
         activeTimeLabel.setAccessibilityLabel(activeTimeLabel.stringValue)
+        let durationSummary = session.duration > 0 ? "\(Int(ceil(session.duration / 60))) min økt" : "Uten tidsgrense"
+        trackingSummary.stringValue = coordinator.trackingEnabled ? "Toggl på · \(durationSummary)" : durationSummary
+        trackingSummary.setAccessibilityLabel(trackingSummary.stringValue)
+        trackingSummary.isHidden = !compact
         for view in expandedRows { view.isHidden = compact }
         togglControls.isHidden = compact || !connected
         togglStatus.isHidden = compact || (!connected && snapshot.tracking.periods.allSatisfy { $0.accountID == nil })
         openButton.isHidden = compact
         endButton.isHidden = compact && session.task.queue == nil
-        extendButton.isHidden = compact || session.duration == 0
+        openButton.superview?.isHidden = compact && session.task.queue == nil
+        extendButton.isHidden = session.duration == 0 || session.queueCompleted == true
         positionPicker.isHidden = compact
         var notice = FocusNotice.make(coordinator: coordinator, completing: isCompleting, completionError: completionError)
         if let error = nextError { notice.text = [notice.text, error].filter { !$0.isEmpty }.joined(separator: "\n") }
@@ -511,7 +562,9 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         noticeHeight.constant = notice.text.isEmpty ? 0 : ceil((notice.text as NSString).boundingRect(
             with: NSSize(width: width, height: 10000), options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [.font: noticeLabel.font!]).height) + 4
-        let key = "\(compact)-\(snapshot.appearance.fontSize)-\(width)-\(notice.text)-\(togglControls.isHidden)-\(togglStatus.isHidden)"
+        // Hidden detail rows must not impose their minimum width on the compact card.
+        for (row, constraint) in rowWidths { constraint.isActive = !row.isHidden }
+        let key = "\(compact)-\(snapshot.appearance.fontSize)-\(width)-\(session.task.title)-\(projectLabel.isHidden)-\(queueRow.isHidden)-\(pauseButton.isHidden)-\(extendButton.isHidden)-\(notice.text)-\(togglControls.isHidden)-\(togglStatus.isHidden)"
         if panel != nil && key != lastLayoutKey {
             lastLayoutKey = key
             applySize()
@@ -531,16 +584,21 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         constrainToScreen()
     }
 
+    var measuredTitleHeight: CGFloat {
+        let font = NSFont.systemFont(ofSize: snapshot.appearance.fontSize, weight: .semibold)
+        return ceil((titleLabel.stringValue as NSString).boundingRect(
+            with: NSSize(width: max(1, viewWidth - 48), height: 10000), options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font]).height) + 8
+    }
+
     func layoutTitle() {
         guard !isLayingOut else { return }
         isLayingOut = true
         defer { isLayingOut = false }
-        let width = max(1, viewWidth - 64)
+        let width = max(1, viewWidth - 48)
         let font = NSFont.systemFont(ofSize: snapshot.appearance.fontSize, weight: .semibold)
         titleLabel.font = font
-        let height = ceil((titleLabel.stringValue as NSString).boundingRect(
-            with: NSSize(width: width, height: 10000), options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font]).height) + 8
+        let height = measuredTitleHeight
         titleWidth.constant = width
         titleHeight.constant = max(font.pointSize + 8, height)
         // Grow to show normal titles in full; unusually long titles remain scrollable.
@@ -555,10 +613,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func growForTitle(fit: Bool = false) {
         if compact { layoutTitle(); return }
-        let width = max(1, viewWidth - 64)
-        let font = NSFont.systemFont(ofSize: snapshot.appearance.fontSize, weight: .semibold)
-        let height = ceil((titleLabel.stringValue as NSString).boundingRect(
-            with: NSSize(width: width, height: 10000), options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: font]).height) + 8
+        let height = measuredTitleHeight
         let limit = min(800, (panel.screen ?? NSScreen.main)?.visibleFrame.height ?? 800)
         let needed = min(limit, max(panel.minSize.height, height + fixedContentHeight))
         if needed > panel.frame.height || fit {
