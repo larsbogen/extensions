@@ -41,9 +41,9 @@ struct PresentationTests {
         let controls: [(String, NSView)] = [
             ("header menu", controller.actionMenu), ("project", controller.projectLabel),
             ("title area", controller.titleScroll), ("time ring", controller.progress),
-            ("pause", controller.pauseButton), ("extend", controller.extendButton),
+            ("extend", controller.extendButton),
             ("complete", controller.completeButton),
-            ("next task", controller.nextButton), ("break", controller.breakButton),
+            ("next task", controller.nextButton),
             ("notice", controller.noticeLabel), ("retry", controller.retryButton), ("details", controller.detailsButton),
             ("Toggl toggle", controller.togglToggle), ("Toggl project", controller.togglProject),
             ("Toggl status", controller.togglStatus), ("Toggl settings", controller.togglSettings),
@@ -195,13 +195,24 @@ struct PresentationTests {
                     content.layoutSubtreeIfNeeded()
                     assertFitsCard(controller, content: content, context: "\(mode) font=\(font) titleLength=\(title.count)")
                     assert(controller.contentStack.frame.height <= content.bounds.height - 54 + 1)
-                    assert(!controller.pauseButton.isHidden)
+                    assert(!controller.statusLabel.stringValue.uppercased().contains("TODOIST"))
 
                     assert(controller.titleLabel.stringValue == title && controller.titleLabel.accessibilityLabel() == title)
                     assert(controller.titleWidth.constant > 0 && controller.titleHeight.constant.isFinite)
                     assertVisible(controller.progress)
                     assertVisible(controller.completeButton)
                     assert(controller.completeButton.title == "Fullfør")
+                    assert(controller.completeButton.style == .primary)
+                    let completeFrame = controller.completeButton.convert(controller.completeButton.bounds, to: content)
+                    let extendFrame = controller.extendButton.convert(controller.extendButton.bounds, to: content)
+                    assert(abs(completeFrame.midY - extendFrame.midY) < 1 && completeFrame.maxX <= extendFrame.minX,
+                           "Fullfør occupies the primary position beside +5 min")
+                    func hasPauseButton(_ view: NSView) -> Bool {
+                        if let button = view as? NSButton, let action = button.action,
+                           [#selector(FocusController.togglePause), #selector(FocusController.takeBreak)].contains(action) { return true }
+                        return view.subviews.contains(where: hasPauseButton)
+                    }
+                    assert(!hasPauseButton(content), "Pause controls belong only in the menu")
                     assert(controller.completeButton.action == #selector(FocusController.completeTask))
                     assert(controller.completeButton.keyEquivalent == "\r" && controller.completeButton.keyEquivalentModifierMask == .command)
                     assert(controller.progress.hasTimeLimit && abs(controller.progress.geometry.clampedProgress - 42.0 / 1500) < 0.001)
@@ -215,9 +226,13 @@ struct PresentationTests {
                 coordinator.snapshot.session?.phase = phase
                 controller.render()
                 let model = controller.presentation!
-                assert(controller.pauseButton.title == model.pauseTitle && controller.completeButton.isEnabled == model.canComplete)
+                assert(controller.completeButton.isEnabled == model.canComplete)
                 let menu = controller.makeActionsMenu()
-                assert(menu.item(at: 0)?.title == (mode == .compact ? "Vis detaljer" : "Vis kompakt"))
+                let pause = menu.item(at: 0)!
+                assert(pause.title == model.pauseTitle && pause.action == #selector(FocusController.togglePause))
+                assert(pause.target === controller && pause.isEnabled == model.canPause)
+                assert(pause.keyEquivalent == "p" && pause.keyEquivalentModifierMask == .command)
+                assert(menu.items.first { $0.action == #selector(FocusController.toggleViewMode) }?.title == (mode == .compact ? "Vis detaljer" : "Vis kompakt"))
                 assert(menu.items.first { $0.action == #selector(FocusController.completeTask) }?.isEnabled == model.canComplete)
             }
         }
@@ -226,7 +241,9 @@ struct PresentationTests {
         controller.render()
         assert(controller.actionMenu.accessibilityLabel() == "Handlinger for fokusoppgaven")
         assert(controller.handleShortcut("p", modifiers: .command) && coordinator.snapshot.session?.phase == .paused)
+        assert(controller.makeActionsMenu().item(at: 0)?.title == "Fortsett")
         assert(controller.handleShortcut("p", modifiers: .command) && coordinator.snapshot.session?.phase == .running)
+        assert(controller.makeActionsMenu().item(at: 0)?.title == "Pause")
         assert(!controller.handleShortcut("p", modifiers: [.command, .option]))
         coordinator.snapshot.session?.duration = 0
         controller.render()
@@ -243,7 +260,8 @@ struct PresentationTests {
         coordinator.snapshot.session?.elapsed = 42
         controller.isCompleting = true
         controller.render()
-        assert(!controller.pauseButton.isEnabled && !controller.completeButton.isEnabled && !controller.noticeStack.isHidden)
+        assert(controller.makeActionsMenu().item(at: 0)?.isEnabled == false && !controller.completeButton.isEnabled && !controller.noticeStack.isHidden)
+        assert(!controller.noticeLabel.stringValue.contains("Todoist") && !controller.hintLabel.stringValue.contains("Todoist"))
         assertVisible(controller.completeButton)
         assert(controller.completeButton.title == "Fullfører …")
         assert(controller.handleShortcut("+", modifiers: .command) && coordinator.snapshot.session?.duration == 0)
@@ -334,6 +352,12 @@ struct PresentationTests {
             content.frame = NSRect(x: 0, y: 0, width: 360, height: 800)
             view.render()
             assert(!view.queueRow.isHidden && view.nextButton.isEnabled)
+            engine.snapshot.session?.phase = .finished
+            view.render()
+            assert(view.makeActionsMenu().item(at: 0)?.title == "Fortsett")
+            assert(view.makeActionsMenu().items.contains { $0.action == #selector(FocusController.takeBreak) && $0.isEnabled })
+            engine.snapshot.session?.phase = .paused
+            view.render()
             view.isCompleting = true
             let automaticStop = FocusRequest(id: "auto-missing-task", action: "stop", taskId: queued.task.id, sessionId: queued.id, automatic: true)
             assert(view.handleRequest(automaticStop))
@@ -343,11 +367,12 @@ struct PresentationTests {
             try JSONEncoder().encode(result).write(to: directory.appendingPathComponent("completion.json"))
             view.consumeCompletion()
             assert(engine.snapshot.session?.phase == .ended && engine.snapshot.session?.queueCompleted == true)
-            assert(!view.isHiddenForSync && view.nextButton.title == "Start neste" && !view.pauseButton.isEnabled)
+            assert(!view.isHiddenForSync && view.nextButton.title == "Start neste" && view.makeActionsMenu().item(at: 0)?.isEnabled == false)
             assert(view.nextButton.isEnabled && !view.endButton.isHidden)
             engine.snapshot.session?.pendingNextRequestId = "pending"
             view.render()
             assert(!view.nextButton.isEnabled && !view.completeButton.isEnabled && !view.endButton.isEnabled)
+            assert(view.makeActionsMenu().item(at: 0)?.isEnabled == false)
             engine.snapshot.session?.pendingNextRequestId = nil
             engine.snapshot.session?.queueFinished = true
             view.render()

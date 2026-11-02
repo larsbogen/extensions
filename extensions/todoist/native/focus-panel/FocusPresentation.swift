@@ -13,7 +13,8 @@ struct FocusPresentation {
         switch session.phase {
         case .running: return "Pause"
         case .paused: return "Fortsett"
-        case .finished, .ended: return "Ny økt"
+        case .finished: return session.task.queue == nil ? "Ny økt" : "Fortsett"
+        case .ended: return "Ny økt"
         }
     }
 }
@@ -25,7 +26,7 @@ struct FocusNotice {
 
     static func make(coordinator: FocusCoordinator, completing: Bool, completionError: String?) -> FocusNotice {
         var messages: [String] = []
-        if completing { messages.append("Fullfører oppgaven i Todoist. Timeren er satt på pause.") }
+        if completing { messages.append("Fullfører oppgaven. Timeren er satt på pause.") }
         else if let error = completionError { messages.append(error) }
         let tracking = coordinator.snapshot.tracking
         let needsDetails = coordinator.storageError != nil || coordinator.pendingStop ||

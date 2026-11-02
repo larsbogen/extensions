@@ -147,8 +147,10 @@ Prosjektnavnet vises over tittelen når det finnes. Tiden står midt i ringen, s
 fylles med klokken etter hvert som økten går. Ved pause blir ringen oransje. Økter
 uten tidsgrense viser aktiv tid og en nøytral ring uten prosentvis fremdrift.
 
-**Pause/Fortsett**, **+5 min** og **Fullfør** er synlige i både kompakt- og detaljvisning.
-Lange titler kan rulles uten å forkortes. Menyen **•••** gir **Vis detaljer**, **Fullfør oppgave**, **+5 min**,
+**Fullfør** er den fremhevede hovedknappen ved siden av **+5 min** i både kompakt-
+og detaljvisning. **Pause/Fortsett** ligger øverst i menyen **•••**, med hurtigtasten
+⌘P. Kortets status viser **FOKUS** eller **PÅ PAUSE**, uten produktnavn.
+Lange titler kan rulles uten å forkortes. Menyen gir også **Vis detaljer**, **Fullfør oppgave**, **+5 min**,
 **Åpne oppgave**, **Flytt** og **Avslutt økt**. Ubegrensede økter skjuler **+5 min**.
 **Vis detaljer** åpner alle kontrollene nedenfor; velg **Vis kompakt** for å gå tilbake.
 Visningsvalg og størrelse for hver visning huskes separat, sammen med tekststørrelse
@@ -165,7 +167,7 @@ uten å endre lagret størrelse. ⌘P, ⌘+ og ⌘↵ virker i begge visninger.
 - En ny økt starter med 25 minutter. Velg 15, 25, 50 minutter eller uten tidsgrense i kortet,
   eller endre standarden i utvidelsens **Focus Session Length**-innstilling.
   Endring av varighet bevarer tiden du allerede har jobbet.
-- **Pause / Fortsett** styrer aktiv tid, og **+5 min** forlenger økten.
+- **Pause / Fortsett** i menyen styrer aktiv tid, og **+5 min** forlenger økten.
   Når tiden er ute, blir kortet stående med valget om ny økt eller forlengelse.
 - **Åpne oppgave** åpner oppgaven i Todoist. **Avslutt økt** lukker kortet og stopper timeren.
   Ingen av delene fullfører oppgaven i Todoist.
@@ -463,7 +465,9 @@ lint og produksjonsbygg kontrolleres separat. Faktisk samspill med skrivebord,
 fysiske skjermer og VoiceOver er ikke verifisert av disse testene.
 
 Tidsringtestene kontrollerer retning og fremdrift, ubegrensede økter, lange klokketider,
-synlig **Fullfør**-knapp og sperrede handlinger mens fullføring pågår. Løsrevne
+synlig **Fullfør**-knapp, pause/fortsett via meny og hurtigtast, og sperrede handlinger
+mens fullføring pågår. Layouten kontrolleres med **Fullfør** som hovedknapp ved siden
+av **+5 min**, uten egne pauseknapper eller produktnavn i statusen. Løsrevne
 AppKit-visninger bytter mellom lyst og mørkt utseende; testene kontrollerer at
 fargene oppdateres og at økt, kø og Toggl-data bevares uten lagring eller nettverkskall.
 Dette tester AppKits utseendearv uten å endre brukerens systeminnstilling. Et faktisk

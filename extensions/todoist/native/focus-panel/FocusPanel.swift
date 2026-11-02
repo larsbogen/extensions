@@ -99,17 +99,15 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var nextStarted: TimeInterval = 0
     var nextError: String?
     let nextButton = NSButton(title: "Neste oppgave", target: nil, action: nil)
-    let breakButton = NSButton(title: "Ta pause", target: nil, action: nil)
     var queueRow: NSStackView!
     let titleLabel = DragLabel(wrappingLabelWithString: "")
     let projectLabel = NSTextField(labelWithString: "")
     let trackingSummary = NSTextField(wrappingLabelWithString: "")
-    let statusLabel = DragLabel(labelWithString: "FOKUS · TODOIST")
+    let statusLabel = DragLabel(labelWithString: "FOKUS")
     let clockLabel = NSTextField(labelWithString: "25:00")
     let captionLabel = NSTextField(labelWithString: "igjen")
     let hintLabel = NSTextField(wrappingLabelWithString: "")
     let progress = FocusRingView()
-    let pauseButton = FocusActionButton(title: "Pause", target: nil, action: nil)
     let openButton = NSButton(title: "Åpne oppgave", target: nil, action: nil)
     let endButton = NSButton(title: "Avslutt økt", target: nil, action: nil)
     let completeButton = FocusActionButton(title: "Fullfør", target: nil, action: nil)
@@ -182,7 +180,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel = FocusPanel(contentRect: NSRect(x: 0, y: 0, width: appearance.size.width, height: appearance.size.height),
                            styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel],
                            backing: .buffered, defer: false)
-        panel.title = "Todoist Fokus"
+        panel.title = "Fokus"
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.isFloatingPanel = true
@@ -296,37 +294,31 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         ])
         button(extendButton, #selector(extendSession))
 
-        button(pauseButton, #selector(togglePause))
         button(openButton, #selector(openTask))
         button(endButton, #selector(endSession))
         button(completeButton, #selector(completeTask))
-        pauseButton.keyEquivalent = "p"
-        pauseButton.keyEquivalentModifierMask = [.command]
-        pauseButton.toolTip = "Pause eller fortsett (⌘P)"
         extendButton.keyEquivalent = "+"
         extendButton.keyEquivalentModifierMask = [.command]
         completeButton.keyEquivalent = "\r"
         completeButton.keyEquivalentModifierMask = [.command]
-        pauseButton.style = .primary
-        completeButton.style = .secondary
+        completeButton.style = .primary
         extendButton.style = .secondary
-        for control in [pauseButton, extendButton, completeButton] {
+        for control in [extendButton, completeButton] {
             control.widthAnchor.constraint(greaterThanOrEqualToConstant: 108).isActive = true
         }
-        completeButton.toolTip = "Fullfør oppgaven i Todoist og stopp fokuset"
+        completeButton.toolTip = "Fullfør oppgaven og stopp fokuset"
         button(actionMenu, #selector(showActions))
         actionMenu.setAccessibilityLabel("Handlinger for fokusoppgaven")
         actionMenu.toolTip = "Handlinger og visning"
-        let primaryActions = row([pauseButton, extendButton])
-        let actionGroup = NSStackView(views: [primaryActions, completeButton])
+        let primaryActions = row([completeButton, extendButton])
+        let actionGroup = NSStackView(views: [primaryActions])
         actionGroup.orientation = .vertical
         actionGroup.alignment = .centerX
         actionGroup.spacing = 8
         actionGroup.detachesHiddenViews = true
         let actions = row([openButton, spacer(), endButton])
         button(nextButton, #selector(nextTask))
-        button(breakButton, #selector(takeBreak))
-        queueRow = row([nextButton, breakButton, spacer()])
+        queueRow = row([nextButton, spacer()])
         hintLabel.font = .systemFont(ofSize: 12)
         hintLabel.textColor = FocusTheme.secondary
         hintLabel.maximumNumberOfLines = 2
@@ -446,27 +438,21 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         captionLabel.stringValue = session.duration > 0 ? "igjen" : "aktiv tid"
         switch session.phase {
         case .running:
-            statusLabel.stringValue = "FOKUS · TODOIST"
-            pauseButton.title = "Pause"
+            statusLabel.stringValue = "FOKUS"
             hintLabel.stringValue = "Dra i tittelen for å flytte kortet. Størrelsen velger du nedenfor."
         case .paused:
-            statusLabel.stringValue = "PÅ PAUSE · TODOIST"
-            pauseButton.title = "Fortsett"
+            statusLabel.stringValue = "PÅ PAUSE"
             hintLabel.stringValue = "Tiden står stille. Fortsett når du er klar."
         case .finished:
             statusLabel.stringValue = "ØKTEN ER FERDIG"
-            pauseButton.title = "Ny økt"
             hintLabel.stringValue = "Ta en pause, eller fortsett i fem minutter til."
         case .ended:
             statusLabel.stringValue = "ØKTEN ER AVSLUTTET"
-            pauseButton.title = "Ny økt"
             hintLabel.stringValue = "Start en ny økt når du er klar."
         }
-        pauseButton.setAccessibilityLabel(pauseButton.title)
         completeButton.title = isCompleting ? "Fullfører …" : "Fullfør"
-        completeButton.setAccessibilityLabel(isCompleting ? "Fullfører oppgaven i Todoist" : "Fullfør oppgave i Todoist")
+        completeButton.setAccessibilityLabel(isCompleting ? "Fullfører oppgaven" : "Fullfør oppgave")
         completeButton.isEnabled = presentation?.canComplete == true
-        pauseButton.isEnabled = presentation?.canPause == true
         extendButton.isEnabled = presentation?.canExtend == true
         endButton.isEnabled = presentation?.canEnd == true
         durationPicker.isEnabled = presentation?.canPause == true
@@ -474,18 +460,13 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         nextButton.title = session.pendingNextRequestId != nil ? "Henter neste …" : session.queueCompleted == true ? "Start neste" : "Neste oppgave"
         nextButton.setAccessibilityLabel(nextButton.title)
         nextButton.isEnabled = presentation?.canNext == true
-        breakButton.isHidden = session.phase != .finished || session.queueCompleted == true
-        breakButton.isEnabled = presentation?.canPause == true
-        if session.task.queue != nil && session.phase == .finished { pauseButton.title = "Fortsett" }
         if session.queueCompleted == true {
             statusLabel.stringValue = "OPPGAVEN ER FULLFØRT"
             hintLabel.stringValue = "Start neste når du er klar. Pausen registreres ikke."
         }
         if session.queueFinished == true { hintLabel.stringValue = "Ingen flere oppgaver i køen. Åpne arbeidsdagen for å velge mer." }
-        pauseButton.isHidden = session.queueCompleted == true
-        pauseButton.setAccessibilityLabel(pauseButton.title)
         if isCompleting {
-            hintLabel.stringValue = "Fullfører oppgaven i Todoist. Timeren er satt på pause."
+            hintLabel.stringValue = "Fullfører oppgaven. Timeren er satt på pause."
         } else if let error = completionError {
             hintLabel.stringValue = error
         }
@@ -564,7 +545,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             attributes: [.font: noticeLabel.font!]).height) + 4
         // Hidden detail rows must not impose their minimum width on the compact card.
         for (row, constraint) in rowWidths { constraint.isActive = !row.isHidden }
-        let key = "\(compact)-\(snapshot.appearance.fontSize)-\(width)-\(session.task.title)-\(projectLabel.isHidden)-\(queueRow.isHidden)-\(pauseButton.isHidden)-\(extendButton.isHidden)-\(notice.text)-\(togglControls.isHidden)-\(togglStatus.isHidden)"
+        let key = "\(compact)-\(snapshot.appearance.fontSize)-\(width)-\(session.task.title)-\(projectLabel.isHidden)-\(queueRow.isHidden)-\(extendButton.isHidden)-\(notice.text)-\(togglControls.isHidden)-\(togglStatus.isHidden)"
         if panel != nil && key != lastLayoutKey {
             lastLayoutKey = key
             applySize()
@@ -716,6 +697,12 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func makeActionsMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
+        let pause = NSMenuItem(title: presentation?.pauseTitle ?? "Pause", action: #selector(togglePause), keyEquivalent: "p")
+        pause.target = self
+        pause.keyEquivalentModifierMask = [.command]
+        pause.isEnabled = presentation?.canPause == true
+        menu.addItem(pause)
+        menu.addItem(.separator())
         func add(_ title: String, _ selector: Selector, _ enabled: Bool = true) {
             let item = NSMenuItem(title: title, action: selector, keyEquivalent: "")
             item.target = self; item.isEnabled = enabled; menu.addItem(item)
