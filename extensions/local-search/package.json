@@ -2,7 +2,7 @@
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "local-search",
   "title": "Lokalt søk",
-  "description": "Søk i lokale masteroppgaver og Turatlas.",
+  "description": "Søk i lokale masteroppgaver, Turatlas og reMarkable-notater.",
   "icon": "icon.png",
   "author": "larsbogen",
   "contributors": [],
@@ -26,6 +26,27 @@
       "title": "Søk i Turatlas",
       "description": "Søk i Turatlas",
       "mode": "view"
+    },
+    {
+      "name": "search-remarkable-notes",
+      "title": "Søk i mine reMarkable-notater",
+      "description": "Finn håndskrevne kommentarer og avsnittene ved siden av i lokale PDF-eksporter.",
+      "keywords": [
+        "håndskrift",
+        "margnotater",
+        "reMarkable",
+        "PDF"
+      ],
+      "mode": "view",
+      "preferences": [
+        {
+          "name": "remarkableNotesPath",
+          "title": "Importmappe",
+          "description": "Velg den lokale mappen med PDF-eksportene og originalene.",
+          "type": "directory",
+          "required": true
+        }
+      ]
     },
     {
       "name": "local-services",
@@ -64,9 +85,11 @@
     "dev": "ray develop",
     "fix-lint": "ray lint --fix",
     "lint": "eslint src tests && prettier --check src tests package.json tsconfig.json eslint.config.js",
-    "test": "vitest run --maxWorkers=1",
+    "test": "vitest run --maxWorkers=1 && sh scripts/build-notes.sh test",
     "typecheck": "tsc --noEmit",
-    "lint:store": "ray lint"
+    "lint:store": "ray lint",
+    "prebuild": "sh scripts/build-notes.sh",
+    "predev": "sh scripts/build-notes.sh"
   },
   "preferences": [
     {

@@ -1,6 +1,6 @@
 # Lokalt søk
 
-To private macOS-kommandoer i Raycast: **Søk i masteroppgaver** og **Søk i Turatlas**. Tjenestene startes ved behov uten nettleservindu. Velg et treff for å åpne dokumentet eller turen.
+Private macOS-kommandoer i Raycast for masteroppgaver, Turatlas og søk i egne reMarkable-notater. Tjenestene startes ved behov uten nettleservindu. Velg et treff for å åpne dokumentet eller turen.
 
 ## Oppsett
 
@@ -34,6 +34,25 @@ Turatlas starter med en separat tilfeldig søkenøkkel, privat lagret og bundet 
 `src/library-search.js` er en lokal kopi av bibliotekets rene `web/search.js`, med samme norske normalisering, AND-semantikk og rangeringsvekter. Ved endringer i bibliotekets søk må kopien og kontrakttestene oppdateres sammen. Kopien inneholder ingen katalogdata.
 
 Se [QA](QA.md) for verifikasjon og begrensninger.
+
+## Søk i mine reMarkable-notater
+
+Velg importmappen første gang du åpner kommandoen. Legg de eksporterte PDF-ene i denne strukturen. Underkataloger er tillatt. Bruk samme relative filnavn for den kommenterte utgaven og den tilhørende originalen.
+
+```text
+Min importmappe/
+  Kommenterte/Årsmøte/Emnebeskrivelse.pdf
+  Originaler/Årsmøte/Emnebeskrivelse.pdf
+  Notatbøker/Møtenotater.pdf
+```
+
+Velg **Oppdater indeks** (⌘R). Handlingsmenyen viser dokument, side og årsak når noe hoppes over. En flat dokumenteksport trenger en matchende original. Uten original kan indekseringen isolere synlige PDF-pennestrøk av typen Ink. En slik annotasjon identifiserer pennestrøk, men inneholder ikke nødvendigvis avsenderidentitet. Bruk egne kommenterte eksporter, og legg ved originalen hvis andre har kommentert samme PDF. Ved en tvetydig sidematch utelates siden. **Notatbøker** er for egne håndskrevne notatsider.
+
+Skriv for eksempel `MUR107`. **Håndskrift og avsnitt** viser treff i håndskriften og avsnittet som ligger ved kommentaren. **Bare min håndskrift** søker i leseforslagene for pennestrøkene. Se kilde og eventuell usikkerhet ved hvert treff. Utsnittet viser hva som faktisk står der. Trykk **Retur** for å åpne hele den kommenterte PDF-en på dette stedet. Endrede PDF-er må indekseres igjen.
+
+Apple Vision utfører tekstgjenkjenning på Macen under indeksering. Bilder, leseforslag og posisjoner ligger i `remarkable-notes/` i utvidelsens private Raycast-støttemappe. Katalogen byttes etter en fullført oppdatering. Slettede dokumenter og utgåtte utsnitt fjernes ved neste oppdatering. Søket bruker den ferdige katalogen. Denne kommandoen trenger ingen reMarkable-pålogging.
+
+Hjelperen bygges med Swift og macOS SDK som en del av `npm run build` og `npm run dev`. Det vanlige testløpet inkluderer Swift-testene. Se [QA for piloten](QA.md#remarkable-notater) for testgrunnlag og måling av egen håndskrift.
 
 ## Lokale tjenester
 

@@ -23,7 +23,8 @@ export async function inventory(root, prefix = "") {
   ).sort((a, b) => a.name.localeCompare(b.name))) {
     if (
       ignored.has(entry.name) ||
-      (prefix === "assets" && entry.name === "focus-panel") ||
+      (prefix === "assets" &&
+        ["focus-panel", "remarkable-notes", "remarkable-notes.new"].includes(entry.name)) ||
       entry.name.startsWith(".env") ||
       entry.name.endsWith(".rayconfig") ||
       [".DS_Store", "raycast-env.d.ts"].includes(entry.name)

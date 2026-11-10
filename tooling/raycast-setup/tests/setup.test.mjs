@@ -104,11 +104,14 @@ test("snapshot includes new files and native focus sources, excludes secrets and
   const f = await fixture(t);
   await mkdir(join(f.repo, "shared/native/focus-panel"), { recursive: true });
   await writeFile(join(f.repo, "shared/native/focus-panel/a.swift"), "source");
+  await mkdir(join(f.repo, "shared/assets"), { recursive: true });
+  await writeFile(join(f.repo, "shared/assets/remarkable-notes"), "built helper");
   await writeFile(join(f.repo, "shared/.env"), "secret");
   const out = join(f.repo, "copy");
   await snapshot(f.repo, out, ["shared"]);
   const files = await inventory(join(out, "shared"));
   assert.ok(files["native/focus-panel/a.swift"]);
+  assert.ok(!files["assets/remarkable-notes"]);
   assert.ok(!files[".env"]);
 });
 test("snapshot rejects links outside sources", async (t) => {
