@@ -1,0 +1,5 @@
+{
+  "accountId": "REPLACE_WITH_TODOIST_USER_ID",
+  "verificationToken": "REPLACE_WITH_TODOIST_VERIFICATION_TOKEN",
+  "port": 8765
+}

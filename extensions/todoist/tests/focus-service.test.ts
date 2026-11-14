@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   environment: { supportPath: "" },
   prefs: { focusLabelName: "focus", showFocusWindow: true, focusDuration: "25" },
   start: vi.fn(),
+  prepare: vi.fn(),
   stop: vi.fn(),
   sync: vi.fn(),
   update: vi.fn(),
@@ -28,7 +29,11 @@ vi.mock("@raycast/api", () => ({
   },
 }));
 vi.mock("../src/api", () => ({ initialSync: mocks.sync, updateTask: mocks.update }));
-vi.mock("../src/focus/panel", () => ({ showFocusPanel: mocks.start, stopFocusPanel: mocks.stop }));
+vi.mock("../src/focus/panel", () => ({
+  showFocusPanel: mocks.start,
+  stopFocusPanel: mocks.stop,
+  prepareFocusPanelStart: mocks.prepare,
+}));
 import { clearFocusedTask, startFocusedTask } from "../src/focus/service";
 
 const task = { id: "b", content: "B", labels: [], project_id: "p" } as unknown as Task;
@@ -41,6 +46,7 @@ const queue = { accountId: "owner", day: "2026-10-30", entryId: "entry", revisio
 beforeEach(async () => {
   vi.resetAllMocks();
   mocks.cache.clear();
+  mocks.prefs.showFocusWindow = true;
   mocks.environment.supportPath = await mkdtemp(join(tmpdir(), "focus-service-test-"));
   await mkdir(join(mocks.environment.supportPath, "focus-panel"));
   await writeFile(
@@ -61,6 +67,22 @@ afterEach(async () => {
 });
 
 describe("shared focus service", () => {
+  it("opens the card for an explicit external start even when ordinary focus hides it", async () => {
+    mocks.prefs.showFocusWindow = false;
+    await startFocusedTask(task, state, undefined, undefined, { forcePanel: true });
+    expect(mocks.start).toHaveBeenCalledOnce();
+    expect(mocks.prepare).toHaveBeenCalledWith({ id: "b", content: "B", projectId: "p" }, 25);
+  });
+  it("retains previous focus when external start preflight fails", async () => {
+    mocks.prepare.mockRejectedValue(new Error("Fokusvinduet er ikke bygget"));
+    await expect(startFocusedTask(task, state, undefined, undefined, { forcePanel: true })).rejects.toThrow(
+      "Fokusvinduet er ikke bygget",
+    );
+    expect(mocks.stop).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(JSON.parse(mocks.cache.get("todoist.focusedTask")!).id).toBe("a");
+  });
   it("starts a guarded queue transition with account/project metadata without stopping or hiding the paused card", async () => {
     await startFocusedTask(task, state, queue, guard);
     expect(mocks.stop).not.toHaveBeenCalled();

@@ -86,6 +86,24 @@ struct PresentationTests {
         })
         let controller = FocusController(directory: URL(fileURLWithPath: "/unused"), lockDescriptor: -1)
         controller.coordinator = coordinator
+        // Expired external starts are acknowledged without opening a window,
+        // replacing a timer, or starting a tracking period. The controller is
+        // deliberately detached and has no NSPanel in these tests.
+        let requestEncoder = JSONEncoder()
+        requestEncoder.outputFormatting = .sortedKeys
+        let sessionBeforeExpiredStart = try requestEncoder.encode(coordinator.snapshot.session)
+        let trackingBeforeExpiredStart = try requestEncoder.encode(coordinator.snapshot.tracking)
+        for action in ["start", "start-queue"] {
+            let expired = FocusRequest(id: "expired-\(action)", action: action, task: task,
+                                       duration: 300, expiresAt: Date().timeIntervalSince1970 - 1)
+            assert(controller.handleRequest(expired))
+            assert(coordinator.snapshot.acknowledgedRequests.contains(expired.id))
+            let sessionAfterExpiredStart = try requestEncoder.encode(coordinator.snapshot.session)
+            let trackingAfterExpiredStart = try requestEncoder.encode(coordinator.snapshot.tracking)
+            assert(sessionAfterExpiredStart == sessionBeforeExpiredStart)
+            assert(trackingAfterExpiredStart == trackingBeforeExpiredStart)
+            assert(transport.calls == 0)
+        }
         let content = controller.buildContent()
         for (name, appearance, mode) in [("light", NSAppearance.Name.aqua, FocusViewMode.compact), ("dark", .darkAqua, .compact),
                                          ("details-light", .aqua, .expanded), ("details-dark", .darkAqua, .expanded)] {

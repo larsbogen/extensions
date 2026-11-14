@@ -3,7 +3,13 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { CachedDataParams, initialSync, SyncData, Task, updateTask } from "../api";
-import { FocusQueueContext, FocusTransitionGuard, showFocusPanel, stopFocusPanel } from "./panel";
+import {
+  FocusQueueContext,
+  FocusTransitionGuard,
+  prepareFocusPanelStart,
+  showFocusPanel,
+  stopFocusPanel,
+} from "./panel";
 
 export type FocusedTask = { id: string; content: string; projectId?: string };
 const emptyFocus: FocusedTask = { id: "", content: "" };
@@ -63,17 +69,22 @@ export async function startFocusedTask(
   state: CachedDataParams,
   queue?: FocusQueueContext,
   guard?: FocusTransitionGuard,
+  options: { forcePanel?: boolean } = {},
 ): Promise<void> {
   const prefs = getPreferenceValues<Preferences>();
   if (guard) await assertFocusTransition(guard);
+  const focused = { id: task.id, content: task.content, projectId: task.project_id };
+  const minutes = Number(prefs.focusDuration ?? "25");
+  // External menu actions must fail before disturbing the previous focus if
+  // this Mac cannot open the helper or the configured duration is invalid.
+  if (options.forcePanel) await prepareFocusPanelStart(focused, minutes);
+  if (queue && state.data?.user?.id !== queue.accountId)
+    throw new Error("Arbeidsdagen tilhører en annen Todoist-konto.");
   const previous = readFocusedTask();
   // Native next has already paused and checkpointed the old period. It must
   // remain visible if preparation fails, so do not send the ordinary stop/hide.
   if (!guard && previous.id && previous.id !== task.id) await clearFocusedTask(state);
-  if (queue && state.data?.user?.id !== queue.accountId)
-    throw new Error("Arbeidsdagen tilhører en annen Todoist-konto.");
-  const focused = { id: task.id, content: task.content, projectId: task.project_id };
-  if (process.platform === "darwin" && (queue || prefs.showFocusWindow !== false)) {
+  if (process.platform === "darwin" && (options.forcePanel || queue || prefs.showFocusWindow !== false)) {
     await showFocusPanel(
       {
         ...focused,
@@ -81,7 +92,7 @@ export async function startFocusedTask(
         todoistUserId: state.data?.user?.id,
         queue,
       },
-      Number(prefs.focusDuration ?? "25"),
+      minutes,
       guard,
     );
   }

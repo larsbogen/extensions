@@ -646,7 +646,7 @@ final class FocusController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func handleRequest(_ request: FocusRequest) -> Bool {
         if request.id == snapshot.requestId || snapshot.acknowledgedRequests.contains(request.id) { return true }
-        if request.action == "start-queue", let expiresAt = request.expiresAt,
+        if ["start", "start-queue"].contains(request.action), let expiresAt = request.expiresAt,
            expiresAt < Date().timeIntervalSince1970 { return acknowledge(request) }
         if ["start", "start-queue"].contains(request.action), let task = request.task, !task.id.isEmpty, !task.title.isEmpty {
             if request.transitionRequestId != nil && snapshot.session?.acceptsTransition(request) != true { return acknowledge(request) }

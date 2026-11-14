@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +19,7 @@ describe("floating focus panel bridge", () => {
     root = await mkdtemp(join(tmpdir(), "todoist-focus-test-"));
     executable = join(root, "helper");
     directory = join(root, "session");
-    await writeFile(executable, "test helper");
+    await writeFile(executable, "test helper", { mode: 0o700 });
   });
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
@@ -48,7 +48,7 @@ describe("floating focus panel bridge", () => {
       state = {
         requestId: request.id,
         acknowledgedRequests: [...state.acknowledgedRequests, request.id],
-        session: request.action === "start-queue" ? { originRequestId: request.id } : state.session,
+        session: ["start", "start-queue"].includes(request.action) ? { originRequestId: request.id } : state.session,
       };
       await writeFile(join(directory, "state.json"), JSON.stringify(state));
       await rm(join(directory, "requests", file), { force: true });
@@ -70,6 +70,7 @@ describe("floating focus panel bridge", () => {
     await client.start({ id: "id/with space", content }, 25);
     const request = lastRequest as { duration: number; task: { title: string; url: string; completionURL: string } };
     expect(request.duration).toBe(1500);
+    expect(lastRequest.expiresAt).toBeGreaterThan(Date.now() / 1000);
     expect(request.task.title).toContain('æøå 👩‍💻 — "viktig" $(touch injected)');
     expect(request.task.title).toContain("hele tittelen ".repeat(30));
     expect(request.task.url).toBe("https://todoist.com/app/task/id%2Fwith%20space");
@@ -95,18 +96,25 @@ describe("floating focus panel bridge", () => {
     expect(requests[2].action).toBe("stop");
   });
 
-  it("keeps project metadata and acknowledges concurrent independent Raycast clients", async () => {
-    let processing = Promise.resolve();
+  it("keeps project metadata and rejects a superseded start from an independent Raycast client", async () => {
+    let launches = 0;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => (release = resolve));
     const launch = () => {
-      processing = processing.then(acknowledge);
-      return processing;
+      launches++;
+      if (launches === 2) void acknowledge().then(release);
+      return waiting;
     };
     const first = createFocusPanelClient({ executable, directory, launch });
     const second = createFocusPanelClient({ executable, directory, launch });
-    await Promise.all([
+    const results = await Promise.allSettled([
       first.start({ id: "a", content: "A", projectId: "project-a" }, 25),
       second.start({ id: "b", content: "B", projectId: "project-b" }, 25),
     ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected") as PromiseRejectedResult;
+    expect(rejected.reason.message).toContain("Fokusøkten er endret");
     const state = JSON.parse(await readFile(join(directory, "state.json"), "utf8"));
     expect(state.acknowledgedRequests).toHaveLength(2);
     expect(lastRequest.task).toEqual(expect.objectContaining({ projectId: expect.stringMatching(/^project-/) }));
@@ -222,6 +230,23 @@ describe("floating focus panel bridge", () => {
   it("does not report success before the helper has acknowledged the request", async () => {
     const client = createFocusPanelClient({ executable, directory, launch: async () => undefined, timeoutMs: 10 });
     await expect(client.start({ id: "a", content: "A" }, 25)).rejects.toThrow("svarte ikke");
+    expect(await readdir(join(directory, "requests"))).toEqual([]);
+  });
+
+  it("does not report an expired ordinary start as successful just because it was acknowledged", async () => {
+    const client = createFocusPanelClient({
+      executable,
+      directory,
+      launch: async () => {
+        const request = JSON.parse(await readFile(await requestFile(), "utf8"));
+        await writeFile(
+          join(directory, "state.json"),
+          JSON.stringify({ requestId: request.id, session: { originRequestId: "previous-start" } }),
+        );
+      },
+    });
+    await expect(client.start({ id: "a", content: "A" }, 25)).rejects.toThrow("Fokusøkten er endret");
+    expect(await readdir(join(directory, "requests"))).toEqual([]);
   });
 
   it("removes expired queue starts instead of blocking an older helper inbox", async () => {
@@ -252,8 +277,22 @@ describe("floating focus panel bridge", () => {
     await client.stop();
     expect(launch).not.toHaveBeenCalled();
     await expect(client.start({ id: "a", content: "A" }, 25)).rejects.toThrow("launch failed");
+    expect(await readdir(join(directory, "requests"))).toEqual([]);
     await client.start({ id: "a", content: "A" }, 25);
     expect(launch).toHaveBeenCalledTimes(2);
+  });
+
+  it("preflights helper availability and duration without writing a request or launching", async () => {
+    const launch = vi.fn();
+    const client = createFocusPanelClient({ executable, directory, launch });
+    await expect(client.prepareStart({ id: "a", content: "A" }, 25)).resolves.toBeUndefined();
+    await expect(client.prepareStart({ id: "a", content: "A" }, NaN)).rejects.toThrow("Øktlengden");
+    await chmod(executable, 0o600);
+    await expect(client.prepareStart({ id: "a", content: "A" }, 25)).rejects.toThrow("npm run build:focus");
+    await rm(executable);
+    await expect(client.prepareStart({ id: "a", content: "A" }, 25)).rejects.toThrow("npm run build:focus");
+    await expect(stat(directory)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(launch).not.toHaveBeenCalled();
   });
 
   it("retries when a just-stopped helper still holds the native process lock", async () => {

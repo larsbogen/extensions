@@ -33,3 +33,15 @@ Join our [Slack community](https://raycast.com/community) to share your extensio
 ## Personlig lokalt oppsett
 
 Se [PersonalRaycast](tooling/raycast-setup/README.md) for flyttbar konfigurasjon, kontrollerte oppdateringer, tilbakeføring og kommandoer for de personlige utvidelsene.
+
+Denne personlige forken har lokale tilpasninger i [Todoist](extensions/todoist/README.md),
+[Lokalt søk](extensions/local-search/README.md) og
+[Parallels](extensions/parallels-virtual-machines/README.md). Arbeidsregler og
+testkommandoer for bidrag ligger i [AGENTS.md](AGENTS.md).
+
+Todoist har et flytende fokuskort og en klargjort kobling fra oppgavenes
+høyreklikkmeny i den offisielle appen. [Oppsett av «Start fokus»](extensions/todoist/integrations/focus-context-menu/README.md)
+beskriver den lokale broen, privat Todoist-integrasjon, HTTPS-tunnel og Raycasts
+førstegangstillatelse. Koden er implementert og automatisk testet; aktivering i
+kontoen og faktisk ettklikksbruk er fortsatt uverifisert. Se
+[verifikasjon og begrensninger](extensions/todoist/integrations/focus-context-menu/QA.md).

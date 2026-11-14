@@ -130,6 +130,17 @@ starttidspunkter beholdes, men fordeles ikke på dager. Rapportcache ligger i
 
 ## Flytende fokuskort (macOS)
 
+### Start fra den offisielle Todoist-appen
+
+En privat kontekstmenyutvidelse kan sende valgt oppgave direkte til dette
+fokuskortet gjennom kommandoen **Start Focus Task**. Implementasjonen inkluderer
+en lokal signaturkontrollert bro, bakgrunnstjeneste og automatiserte tester.
+[Oppsett og ettklikksflyt](integrations/focus-context-menu/README.md) beskriver
+Todoist-registrering, HTTPS-tunnel og Raycasts førstegangstillatelse. Integrasjonen
+er ikke aktivert i kontoen ennå; [QA](integrations/focus-context-menu/QA.md) skiller
+automatiske tester fra uverifisert faktisk appbruk.
+
+### Bruk av fokuskortet
 
 **Focus Task** (`⌘F` på en Todoist-oppgave) åpner nå et eget, flyttbart macOS-kort.
 Kortet viser oppgavetittelen med tekstbryting og en tidsring. Det har sin egen størrelse;

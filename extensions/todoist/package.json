@@ -41,6 +41,16 @@
   ],
   "commands": [
     {
+      "name": "focus-task",
+      "title": "Start Focus Task",
+      "subtitle": "Todoist",
+      "description": "Start the existing focus card for a task selected in the official Todoist app.",
+      "mode": "no-view",
+      "platforms": [
+        "macOS"
+      ]
+    },
+    {
       "name": "my-workday",
       "title": "Min arbeidsdag",
       "subtitle": "Todoist",
@@ -833,12 +843,16 @@
     "local:stop": "node scripts/local-agent.mjs stop",
     "local:restart": "node scripts/local-agent.mjs restart",
     "local:uninstall": "node scripts/local-agent.mjs uninstall",
-    "lint": "eslint src tests && prettier --check src tests package.json",
+    "lint": "eslint src tests && prettier --check src tests package.json integrations/focus-context-menu",
     "fix-lint": "ray lint --fix",
     "publish": "npx @raycast/api@latest publish",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint:store": "ray lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "pretest": "npm run test:bridge",
+    "test:bridge": "node --test --test-concurrency=1 integrations/focus-context-menu/*.node-test.mjs",
+    "focus:bridge": "node integrations/focus-context-menu/service.mjs",
+    "focus:bridge:agent": "node integrations/focus-context-menu/launch-agent.mjs"
   }
 }
