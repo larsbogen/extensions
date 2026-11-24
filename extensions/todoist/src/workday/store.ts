@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { isValidDuration } from "../helpers/duration";
 import { createWorkday, type WorkdayPlan } from "./model";
 
 function validateKey(accountId: string, day: string) {
@@ -36,6 +37,7 @@ export function validateWorkday(value: unknown, accountId: string, day: string):
       typeof entry.addedAt !== "string" ||
       !Number.isFinite(Date.parse(entry.addedAt)) ||
       ![entry.title, entry.projectId, entry.projectName].every((field) => typeof field === "string") ||
+      (entry.duration !== undefined && !isValidDuration(entry.duration)) ||
       (entry.status === "active" && activeTasks.has(entry.taskId))
     )
       throw new Error("Arbeidsdagen inneholder ugyldige oppføringer.");

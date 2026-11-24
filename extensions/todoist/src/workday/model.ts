@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Project, Task } from "../api";
+import { isValidDuration } from "../helpers/duration";
 import { dateParts, osloDay } from "../remarkable/plan";
 
 export type WorkdayEntry = {
@@ -11,6 +12,7 @@ export type WorkdayEntry = {
   title: string;
   projectId: string;
   projectName: string;
+  duration?: NonNullable<Task["duration"]>;
 };
 export type WorkdayPlan = {
   version: 1;
@@ -49,6 +51,31 @@ export function activeEntries(plan: WorkdayPlan): WorkdayEntry[] {
   return plan.entries.filter((entry) => entry.status === "active");
 }
 
+function workdayDuration(task: Task): WorkdayEntry["duration"] {
+  if (!isValidDuration(task.duration)) return undefined;
+  const { unit, amount } = task.duration;
+  return { unit, amount };
+}
+
+export function workdayEstimateSummary(plan: WorkdayPlan): string {
+  const active = activeEntries(plan);
+  let minutes = 0;
+  let days = 0;
+  let missing = 0;
+  for (const { duration } of active) {
+    if (!duration) missing++;
+    else if (duration.unit === "day") days += duration.amount;
+    else minutes += duration.amount;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  const time = [hours && `${hours} t`, remainingMinutes && `${remainingMinutes} min`].filter(Boolean).join(" ");
+  const estimate = [time, days && `${days} ${days === 1 ? "dag" : "dager"}`].filter(Boolean).join(" + ");
+  const count = `${active.length} ${active.length === 1 ? "oppgave" : "oppgaver"} valgt`;
+  return [count, estimate, missing && `${missing} uten estimat`].filter(Boolean).join(" · ");
+}
+
 export function addTaskToPlan(plan: WorkdayPlan, task: Task, projects: Project[], now = new Date()): WorkdayPlan {
   if (!eligibleTasks([task], projects, plan.accountId).length)
     throw new Error("Oppgaven er ikke tilgjengelig for din arbeidsdag.");
@@ -66,6 +93,7 @@ export function addTaskToPlan(plan: WorkdayPlan, task: Task, projects: Project[]
         title: task.content,
         projectId: task.project_id,
         projectName: projects.find((project) => project.id === task.project_id)?.name ?? "Ukjent prosjekt",
+        duration: workdayDuration(task),
       },
     ],
   };
@@ -147,6 +175,7 @@ export function reconcilePlan(
         title: task.content,
         projectId: task.project_id,
         projectName: names.get(task.project_id) ?? entry.projectName,
+        duration: workdayDuration(task),
       };
     }),
   };

@@ -17,6 +17,7 @@ import {
   reconcilePlan,
   removeEntry,
   toggleTopThree,
+  workdayEstimateSummary,
 } from "../src/workday/model";
 import { WorkdayStore } from "../src/workday/store";
 
@@ -42,6 +43,8 @@ const recurring = (date: string) =>
   task("repeat", { due: { date, timezone: null, is_recurring: true } as Task["due"] });
 const base = () => createWorkday("me", "2026-10-30");
 const add = (plan: ReturnType<typeof base>, item: Task) => addTaskToPlan(plan, item, projects, now);
+const estimated = (id: string, amount: number, unit: "minute" | "day" = "minute") =>
+  task(id, { duration: { amount, unit } });
 
 describe("a shared, explicitly selected workday", () => {
   it("allows undated and future own/unassigned tasks but excludes collaborators and inactive projects", () => {
@@ -137,6 +140,66 @@ describe("a shared, explicitly selected workday", () => {
   });
 });
 
+describe("estimated time for the selected workday", () => {
+  it("combines minute estimates, keeps days separate and counts missing estimates", () => {
+    const tasks = [
+      estimated("a", 60),
+      estimated("b", 45),
+      estimated("c", 20),
+      estimated("d", 5),
+      estimated("e", 1, "day"),
+      task("f"),
+      task("g", { duration: null }),
+      task("h"),
+    ];
+    const plan = tasks.reduce(add, base());
+    expect(workdayEstimateSummary(plan)).toBe("8 oppgaver valgt · 2 t 10 min + 1 dag · 3 uten estimat");
+    expect(workdayEstimateSummary(base())).toBe("0 oppgaver valgt");
+    expect(workdayEstimateSummary(tasks.slice(-3).reduce(add, base()))).toBe("3 oppgaver valgt · 3 uten estimat");
+    expect(workdayEstimateSummary(add(base(), tasks[0]))).toBe("1 oppgave valgt · 1 t");
+    expect(workdayEstimateSummary(add(base(), estimated("days", 2, "day")))).toBe("1 oppgave valgt · 2 dager");
+  });
+
+  it("only counts active entries, independently of order and top-three markings", () => {
+    const tasks = ["a", "b", "done", "gone", "removed"].map((id) => estimated(id, 10));
+    let plan = tasks.reduce(add, base());
+    plan = removeEntry(plan, plan.entries[4].id);
+    plan = reconcilePlan(plan, [tasks[0], tasks[1], { ...tasks[2], checked: true }, tasks[4]], projects, "me");
+    plan = toggleTopThree(plan, plan.entries[1].id);
+    plan = moveEntry(plan, plan.entries[1].id, -1);
+    expect(workdayEstimateSummary(plan)).toBe("2 oppgaver valgt · 20 min");
+  });
+
+  it.each([
+    { amount: 0, unit: "minute" },
+    { amount: -1, unit: "day" },
+    { amount: 1.5, unit: "minute" },
+    { amount: Infinity, unit: "minute" },
+    { amount: 1, unit: "hour" },
+  ])("treats the unsupported duration $amount $unit as missing", (duration) => {
+    const item = task("a", { duration: duration as Task["duration"] });
+    const selected = add(base(), item);
+    const refreshed = reconcilePlan(add(base(), estimated("a", 35)), [item], projects, "me");
+    for (const plan of [selected, refreshed]) {
+      expect(plan.entries[0].duration).toBeUndefined();
+      expect(workdayEstimateSummary(plan)).toBe("1 oppgave valgt · 1 uten estimat");
+    }
+  });
+
+  it("uses the current estimate on explicit carry-over and excludes a different recurring occurrence", () => {
+    const selected = { ...recurring("2026-10-30"), duration: { amount: 10, unit: "minute" } as const };
+    const previous = add(base(), selected);
+    const updated = { ...selected, duration: { amount: 25, unit: "minute" } as const };
+    const tomorrow = createWorkday("me", "2026-10-31");
+    const carried = carryCandidates(previous, [updated], projects, "me").reduce(add, tomorrow);
+    expect(workdayEstimateSummary(carried)).toBe("1 oppgave valgt · 25 min");
+    expect(workdayEstimateSummary(previous)).toBe("1 oppgave valgt · 10 min");
+    const newOccurrence = { ...recurring("2026-10-31"), duration: updated.duration };
+    expect(carryCandidates(previous, [newOccurrence], projects, "me")).toEqual([]);
+    expect(workdayEstimateSummary(reconcilePlan(previous, [newOccurrence], projects, "me"))).toBe("0 oppgaver valgt");
+  });
+});
+
 describe("durable account/day storage", () => {
   let directory: string;
   let store: WorkdayStore;
@@ -146,6 +209,39 @@ describe("durable account/day storage", () => {
   });
   afterEach(async () => {
     await rm(directory, { recursive: true, force: true });
+  });
+  it("reads an older workday and refreshes changed or cleared estimates without changing the selection", async () => {
+    const account = join(directory, createHash("sha256").update("me").digest("hex"));
+    await mkdir(account);
+    const entry = {
+      id: "entry-a",
+      taskId: "a",
+      occurrence: null,
+      status: "active",
+      addedAt: now.toISOString(),
+      title: "a",
+      projectId: "p",
+      projectName: "Arbeid",
+    };
+    const legacy = { ...base(), revision: 3, entries: [entry], topThree: [entry.id] };
+    await writeFile(join(account, `${legacy.day}.json`), JSON.stringify(legacy));
+    const loaded = (await store.read("me", legacy.day))!;
+    expect(workdayEstimateSummary(loaded)).toBe("1 oppgave valgt · 1 uten estimat");
+
+    const refresh = (item: Task) =>
+      store.update("me", legacy.day, (plan) => reconcilePlan(plan, [item], projects, "me"));
+    const first = await refresh(estimated("a", 60));
+    expect(first.entries[0]).toMatchObject({ id: entry.id, duration: { amount: 60, unit: "minute" } });
+    expect(workdayEstimateSummary(first)).toBe("1 oppgave valgt · 1 t");
+    expect(first.revision).toBe(4);
+    expect((await refresh(estimated("a", 60))).revision).toBe(first.revision);
+    const changed = await refresh(estimated("a", 2, "day"));
+    expect(workdayEstimateSummary(changed)).toBe("1 oppgave valgt · 2 dager");
+    const cleared = await refresh(task("a", { duration: null }));
+    expect(workdayEstimateSummary(cleared)).toBe("1 oppgave valgt · 1 uten estimat");
+    expect(cleared.topThree).toEqual(legacy.topThree);
+    expect(cleared.entries[0].id).toBe(entry.id);
+    expect(await store.read("me", legacy.day)).toEqual(cleared);
   });
   it("persists order/top three, increments only changed revisions and separates accounts/days", async () => {
     const first = await store.update("me", "2026-10-30", (plan) => add(plan, task("a")));

@@ -65,6 +65,12 @@ forslag fra dagens og forfalte oppgaver, eller søk blant alle aktive oppgaver s
 er dine eller uten tildeling. Oppgaver uten dato eller med en fremtidig dato kan
 også tas med. **Legg til i arbeidsdagen** finnes dessuten i de vanlige oppgavelistene.
 
+Øverst i arbeidsdagen kan det for eksempel stå **8 oppgaver valgt · 2 t 10 min + 1 dag · 3 uten estimat**.
+Minuttestimater summeres til timer og minutter, og dagsestimater vises i dager. Tallet «uten estimat»
+viser hvor mange av de aktive oppgavene som mangler en gyldig varighet i Todoist.
+Du ser samme sammendrag i tittelen mens du legger til eller viderefører oppgaver. Endrer du en
+varighet i Todoist, henter **Oppdater arbeidsdagen** det nye estimatet.
+
 - **Flytt opp/ned** bestemmer arbeidsrekkefølgen. **Marker som topp tre** fremhever
   inntil tre oppgaver uavhengig av rekkefølgen; markeringen endrer ikke Todoist-prioritet.
 - Oppdatering fra Todoist beholder utvalget og rekkefølgen. Fullførte og utilgjengelige
@@ -492,6 +498,11 @@ tema, både kompakt (360 punkter) og detaljvisning (420 punkter). Layouttestene
 dekker også kompaktbredden 320, tilkoblet Toggl, fullføring, feil og fullført køoppgave.
 
 ## Verifikasjon av arbeidsdag, kø, rapporter og forhåndsvisning
+
+For tidsestimatet i **Min arbeidsdag** bestod 287 Vitest-tester, 14 brotester, lint og typesjekk
+24. november 2026. Regresjonstestene bruker simulerte Todoist-data og dekker blant annet blandede
+minutt- og dagsestimater, manglende anslag, oppdatering av eldre planer og valg av gjentakende
+oppgaver. Visningen i Raycast og henting fra en ekte Todoist-konto er ikke verifisert for denne endringen.
 
 Den normale testpakken dekker planlagring, samtidige oppdateringer, kontoskille,
 valgt videreføring, gjentakende oppgaver og samme rekkefølge gjennom arbeidsdag,

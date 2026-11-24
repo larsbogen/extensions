@@ -290,7 +290,7 @@ export default function TaskActions({
           icon={Icon.Plus}
           onAction={async () => {
             try {
-              await addToToday(task.id);
+              await addToToday(task, data?.user?.id);
               await showToast({ style: Toast.Style.Success, title: "Lagt til i arbeidsdagen" });
             } catch (error) {
               await showFailureToast(error, { title: "Kunne ikke legge til i arbeidsdagen" });

@@ -7,7 +7,7 @@ vi.mock("../src/helpers/withTodoistApi", () => ({ getTodoistApi: () => ({}) }));
 vi.mock("../src/workday/runtime", () => ({ getWorkdayStore: () => ({ update: dependencies.update }) }));
 
 import { addTaskToPlan, createWorkday, type WorkdayPlan } from "../src/workday/model";
-import { editWorkday } from "../src/workday/service";
+import { addToToday, editWorkday } from "../src/workday/service";
 
 const day = "2026-10-30";
 const project = { id: "p", name: "Arbeid" } as Project;
@@ -22,6 +22,30 @@ describe("workday edits use fresh account and day guards", () => {
     vi.setSystemTime(new Date("2026-10-30T10:00:00Z"));
   });
   afterEach(() => vi.useRealTimers());
+
+  it("adds the latest duration from Todoist for the selected occurrence", async () => {
+    const selected = {
+      ...task,
+      due: { date: day, is_recurring: true, timezone: null } as Task["due"],
+      duration: { amount: 5, unit: "minute" } as const,
+    };
+    const current = { ...selected, duration: { amount: 25, unit: "minute" } as const };
+    dependencies.initialSync.mockResolvedValue({ ...snapshot(), items: [current] });
+    dependencies.update.mockImplementation(async (_accountId, _day, mutate: (value: WorkdayPlan) => WorkdayPlan) =>
+      mutate(createWorkday("me", day)),
+    );
+    const result = await addToToday(selected, "me", day);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]).toMatchObject({ taskId: task.id, duration: current.duration });
+  });
+
+  it("rejects adding a different recurring occurrence with the same task id before writing", async () => {
+    const selected = { ...task, due: { date: day, is_recurring: true, timezone: null } as Task["due"] };
+    const current = { ...selected, due: { ...selected.due, date: "2026-10-31" } };
+    dependencies.initialSync.mockResolvedValue({ ...snapshot(), items: [current] });
+    await expect(addToToday(selected, "me", day)).rejects.toThrow("annen forekomst");
+    expect(dependencies.update).not.toHaveBeenCalled();
+  });
 
   it("rejects an old account's open view before invoking its mutation or writer", async () => {
     dependencies.initialSync.mockResolvedValue(snapshot("other"));

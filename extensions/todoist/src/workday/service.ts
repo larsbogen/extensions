@@ -1,10 +1,14 @@
-import { initialSync, type SyncData } from "../api";
+import { initialSync, type SyncData, type Task } from "../api";
 import { getTodoistApi } from "../helpers/withTodoistApi";
 import { fetchCompletions } from "../reports/activity";
 import { reportRange } from "../reports/dates";
 import { osloDay } from "../remarkable/plan";
-import { addTaskToPlan, createWorkday, reconcilePlan, type WorkdayPlan } from "./model";
+import { addTaskToPlan, createWorkday, occurrenceKey, reconcilePlan, type WorkdayPlan } from "./model";
 import { getWorkdayStore } from "./runtime";
+
+function requireToday(day: string) {
+  if (day !== osloDay(new Date())) throw new Error("Det er en ny dag. Oppdater arbeidsdagen først.");
+}
 
 export async function freshWorkdayData(): Promise<SyncData> {
   const data = await initialSync();
@@ -37,14 +41,24 @@ export async function loadWorkday(now = new Date()) {
   return { data, day, plan, previous };
 }
 
-export async function addToToday(taskId: string): Promise<WorkdayPlan> {
+export async function addToToday(selected: Task, accountId?: string, day = osloDay(new Date())): Promise<WorkdayPlan> {
   const observedAt = new Date().toISOString();
   const data = await freshWorkdayData();
-  const task = data.items.find((item) => item.id === taskId);
+  if (accountId !== undefined && data.user.id !== accountId)
+    throw new Error("Todoist-kontoen er endret. Åpne oppgavelisten på nytt.");
+  requireToday(day);
+  const task = data.items.find((item) => item.id === selected.id);
   if (!task) throw new Error("Oppgaven finnes ikke lenger blant aktive oppgaver.");
-  return getWorkdayStore().update(data.user.id, osloDay(new Date()), (plan) =>
-    addTaskToPlan(reconcilePlan(plan, data.items, data.projects, data.user.id, [], observedAt), task, data.projects),
-  );
+  if (occurrenceKey(task) !== occurrenceKey(selected))
+    throw new Error("Oppgaven har en annen forekomst. Åpne oppgavelisten på nytt.");
+  return getWorkdayStore().update(data.user.id, day, (plan) => {
+    requireToday(day);
+    return addTaskToPlan(
+      reconcilePlan(plan, data.items, data.projects, data.user.id, [], observedAt),
+      task,
+      data.projects,
+    );
+  });
 }
 
 export async function editWorkday(
@@ -55,7 +69,7 @@ export async function editWorkday(
   const observedAt = new Date().toISOString();
   const data = await freshWorkdayData();
   if (data.user.id !== accountId) throw new Error("Todoist-kontoen er endret. Åpne arbeidsdagen på nytt.");
-  if (day !== osloDay(new Date())) throw new Error("Det er en ny dag. Oppdater arbeidsdagen først.");
+  requireToday(day);
   return getWorkdayStore().update(accountId, day, (plan) =>
     change(reconcilePlan(plan, data.items, data.projects, accountId, [], observedAt)),
   );

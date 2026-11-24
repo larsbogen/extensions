@@ -21,19 +21,18 @@ import { refreshMenuBarCommand } from "../helpers/menu-bar";
 import { osloDay } from "../remarkable/plan";
 import {
   activeEntries,
-  addTaskToPlan,
   carryCandidates,
   eligibleTasks,
   isSuggested,
   moveEntry,
-  reconcilePlan,
+  occurrenceKey,
   removeEntry,
   toggleTopThree,
+  workdayEstimateSummary,
   type WorkdayEntry,
   type WorkdayPlan,
 } from "../workday/model";
-import { getWorkdayStore } from "../workday/runtime";
-import { editWorkday, freshWorkdayData, loadWorkday } from "../workday/service";
+import { addToToday, editWorkday, loadWorkday } from "../workday/service";
 
 type LoadedWorkday = Awaited<ReturnType<typeof loadWorkday>>;
 
@@ -59,24 +58,13 @@ function TaskPicker({
         { title: "Dagens og forfalte oppgaver", tasks: candidates.filter((task) => isSuggested(task, plan.day)) },
         { title: "Andre aktive oppgaver", tasks: candidates.filter((task) => !isSuggested(task, plan.day)) },
       ];
+  const selectedOccurrences = new Map(activeEntries(plan).map((entry) => [entry.taskId, entry.occurrence]));
   async function add(task: Task) {
     if (pending.current) return;
     pending.current = true;
     setBusy(true);
     try {
-      if (osloDay(new Date()) !== plan.day) throw new Error("Det er en ny dag. Åpne arbeidsdagen på nytt.");
-      const observedAt = new Date().toISOString();
-      const fresh = await freshWorkdayData();
-      if (fresh.user.id !== plan.accountId) throw new Error("Todoist-kontoen er endret. Åpne arbeidsdagen på nytt.");
-      const current = fresh.items.find((item) => item.id === task.id);
-      if (!current) throw new Error("Oppgaven er ikke lenger tilgjengelig.");
-      const next = await getWorkdayStore().update(plan.accountId, plan.day, (value) =>
-        addTaskToPlan(
-          reconcilePlan(value, fresh.items, fresh.projects, fresh.user.id, [], observedAt),
-          current,
-          fresh.projects,
-        ),
-      );
+      const next = await addToToday(task, plan.accountId, plan.day);
       setPlan(next);
       onChanged(next);
       await showToast({ style: Toast.Style.Success, title: "Lagt til i arbeidsdagen" });
@@ -90,8 +78,8 @@ function TaskPicker({
   return (
     <List
       isLoading={busy}
-      navigationTitle={carryOnly ? "Velg hva som videreføres" : "Velg oppgaver til arbeidsdagen"}
-      searchBarPlaceholder="Søk blant dine aktive oppgaver"
+      navigationTitle={workdayEstimateSummary(plan)}
+      searchBarPlaceholder={carryOnly ? "Velg hva som videreføres" : "Velg oppgaver til arbeidsdagen"}
     >
       <List.EmptyView
         title="Ingen tilgjengelige oppgaver"
@@ -104,7 +92,7 @@ function TaskPicker({
       {sections.map((section) => (
         <List.Section key={section.title} title={section.title}>
           {section.tasks.map((task) => {
-            const selected = activeEntries(plan).some((entry) => entry.taskId === task.id);
+            const selected = selectedOccurrences.get(task.id) === occurrenceKey(task);
             return (
               <List.Item
                 key={task.id}
@@ -225,6 +213,11 @@ export function WorkdaySections({ pickTasks = false }: { pickTasks?: boolean }) 
     }
   }
 
+  const plan = state?.plan;
+  const active = plan ? activeEntries(plan) : [];
+  const hasCarryCandidates =
+    state && carryCandidates(state.previous, state.data.items, state.data.projects, state.plan.accountId).length > 0;
+
   function commonActions() {
     return (
       <ActionPanel.Section>
@@ -235,14 +228,13 @@ export function WorkdaySections({ pickTasks = false }: { pickTasks?: boolean }) 
             target={<TaskPicker initial={state} carryOnly={false} onChanged={changed} />}
           />
         )}
-        {state &&
-          carryCandidates(state.previous, state.data.items, state.data.projects, state.plan.accountId).length > 0 && (
-            <Action.Push
-              title="Velg hva som videreføres"
-              icon={Icon.ArrowRight}
-              target={<TaskPicker initial={state} carryOnly={true} onChanged={changed} />}
-            />
-          )}
+        {state && hasCarryCandidates && (
+          <Action.Push
+            title="Velg hva som videreføres"
+            icon={Icon.ArrowRight}
+            target={<TaskPicker initial={state} carryOnly={true} onChanged={changed} />}
+          />
+        )}
         <Action
           title="Oppdater arbeidsdagen"
           icon={Icon.ArrowClockwise}
@@ -262,7 +254,6 @@ export function WorkdaySections({ pickTasks = false }: { pickTasks?: boolean }) 
       </ActionPanel.Section>
     );
   }
-  const plan = state?.plan;
   return (
     <>
       {error && (
@@ -280,25 +271,19 @@ export function WorkdaySections({ pickTasks = false }: { pickTasks?: boolean }) 
       >
         <List.Item
           title={
-            plan && activeEntries(plan).length
-              ? "Start dagens fokus"
-              : busy
-                ? "Henter arbeidsdagen …"
-                : "Velg oppgaver til arbeidsdagen"
+            active.length ? "Start dagens fokus" : busy ? "Henter arbeidsdagen …" : "Velg oppgaver til arbeidsdagen"
           }
           icon={Icon.Center}
-          subtitle={plan ? `${activeEntries(plan).length} oppgaver valgt` : undefined}
+          subtitle={plan ? workdayEstimateSummary(plan) : undefined}
           actions={
             <ActionPanel>
-              {plan && activeEntries(plan).length > 0 && (
-                <Action title="Start dagens fokus" icon={Icon.Play} onAction={() => start()} />
-              )}
+              {active.length > 0 && <Action title="Start dagens fokus" icon={Icon.Play} onAction={() => start()} />}
               {commonActions()}
             </ActionPanel>
           }
         />
         {plan &&
-          activeEntries(plan).map((entry, index) => (
+          active.map((entry, index) => (
             <List.Item
               key={entry.id}
               id={entry.id}

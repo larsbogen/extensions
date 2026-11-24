@@ -1,6 +1,7 @@
 import crypto from "crypto";
 
 import { sync_token, syncRequest } from "../api";
+import { isValidDuration } from "../helpers/duration";
 import { mapPriority } from "../helpers/priorities";
 import { parseOptionalStringList } from "../helpers/parseStringList";
 import { withTodoistApi } from "../helpers/withTodoistApi";
@@ -148,16 +149,6 @@ type TaskArgs = Omit<Input, "labels"> & {
 
 function isValidDeadline(deadline: Input["deadline"]): deadline is NonNullable<Input["deadline"]> {
   return typeof deadline?.date === "string" && deadline.date.trim().length > 0;
-}
-
-function isValidDuration(duration: Input["duration"]): duration is NonNullable<Input["duration"]> {
-  return (
-    duration != null &&
-    (duration.unit === "minute" || duration.unit === "day") &&
-    Number.isFinite(duration.amount) &&
-    Number.isInteger(duration.amount) &&
-    duration.amount > 0
-  );
 }
 
 export default withTodoistApi(async function (input: Input) {
